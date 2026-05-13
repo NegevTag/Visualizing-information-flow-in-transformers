@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cmd /c \"where latexmk\" 2>&1)",
+      "PowerShell(cmd /c \"where pdflatex\" 2>&1)",
+      "Bash(dir \"C:\\\\Users\\\\wildn\\\\.claude\\\\plans\")"
+    ]
+  }
+}

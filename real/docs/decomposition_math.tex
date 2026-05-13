@@ -1,0 +1,78 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{parskip}
+\geometry{margin=1.25in}
+
+\title{Linearized Per-Source Residual Decomposition}
+\date{}
+
+\begin{document}
+\maketitle
+
+% -----------------------------------------------------------------------
+\section{Notation}
+
+A decoder-only transformer $\mathcal{M}$ with $L$ layers, $H$ heads, model
+dimension $d$, feed-forward dimension $d_{\mathrm{ff}}$, head dimension
+$d_h = d/H$, and input sequence of $N$ tokens.
+
+\medskip
+\begin{tabular}{ll}
+$e_p \in \mathbb{R}^d$                & token embedding at position $p$ \\
+$x^{(\ell)}_p \in \mathbb{R}^d$      & residual stream at layer $\ell$, position $p$ (real forward pass) \\
+$A^{(\ell,h)} \in [0,1]^{N\times N}$ & attention matrix of head $h$, layer $\ell$ (frozen) \\
+$W^{(\ell,h)}_{\mathrm{OV}} \in \mathbb{R}^{d\times d}$ & OV circuit: $W^{(\ell,h)}_O W^{(\ell,h)}_V$ \\
+$r^{(\ell,k)}_p \in \mathbb{R}_{>0}$ & inverse-RMS scale, layer $\ell$, position $p$; $k{=}1$ before attention, $k{=}2$ before MLP (frozen) \\
+$\gamma^{(\ell,k)} \in \mathbb{R}^d$ & RMSNorm learned gain, layer $\ell$, sub-block $k$ \\
+$g^{(\ell)}_p \in \mathbb{R}^{d_{\mathrm{ff}}}$ & frozen gate: $\operatorname{SiLU}(W^{(\ell)}_{\mathrm{gate}}\, x^{(\ell)}_p)$ \\
+$c^{(\ell)}_{p,s} \in \mathbb{R}^d$  & \textbf{per-source contribution} of token $s$ to position $p$ at layer $\ell$
+\end{tabular}
+
+\medskip
+The contributions satisfy $\displaystyle x^{(\ell)}_p = \sum_{s=0}^{N-1} c^{(\ell)}_{p,s}$
+and $c^{(\ell)}_{p,s} = 0$ for $s > p$.
+
+% -----------------------------------------------------------------------
+\section{Algorithm}
+
+\paragraph{Initialization ($\ell = 0$).}
+\begin{equation}
+    c^{(0)}_{p,s} =
+    \begin{cases} e_p & s = p \\ 0 & s \neq p \end{cases}
+\end{equation}
+
+\paragraph{Layer recurrence (for $\ell = 0,\dots,L-1$).}
+
+Normalize a contribution vector via frozen RMSNorm:
+\begin{equation}
+    \hat{v}^{(\ell,k)}_p := \gamma^{(\ell,k)} \odot \bigl(r^{(\ell,k)}_p \cdot v\bigr).
+\end{equation}
+\textit{Same scale $r^{(\ell,k)}_p$ as applied to the real activation $x^{(\ell)}_p$.}
+
+Attention step ($k=1$):
+\begin{equation}
+    c^{\mathrm{mid},(\ell)}_{p,s}
+    = c^{(\ell)}_{p,s}
+      + \sum_{h=1}^{H}\sum_{s'=0}^{p}
+        A^{(\ell,h)}_{p,s'}\cdot
+        W^{(\ell,h)}_{\mathrm{OV}}\,\hat{c}^{(\ell,1)}_{s',s}.
+\end{equation}
+\textit{post attention contribution = residtual stream + sum over all heads of attention contribution across position from same original source }
+
+MLP step ($k=2$):
+\begin{equation}
+    c^{(\ell+1)}_{p,s}
+    = c^{\mathrm{mid},(\ell)}_{p,s}
+      + W^{(\ell)}_{\mathrm{down}}\,
+        \Bigl(g^{(\ell)}_p \odot W^{(\ell)}_{\mathrm{up}}\,\hat{c}^{\mathrm{mid},(\ell,2)}_{p,s}\Bigr).
+\end{equation}
+\textit{Residual plus up-project, scale by frozen gate $g^{(\ell)}_p$, down-project.}
+
+\paragraph{Output.} Tensor $c \in \mathbb{R}^{(L+1)\times N\times N\times d}$.
+The visualization shows $\|c^{(\ell)}_{p,s}\|_q$ for $q \in \{0,1,2,\infty\}$.
+
+\end{document}
