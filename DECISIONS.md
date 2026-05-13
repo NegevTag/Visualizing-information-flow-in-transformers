@@ -44,3 +44,16 @@ the rest of the React files, not reinstalled fresh.
 **Why:** the existing install is known-good; `mv` on the same volume is near-
 instant and avoids re-fetching ~21 packages. `node_modules/` is gitignored, so
 the move is invisible to git.
+
+### 13. Always push each phase branch when the phase is finished
+
+When a phase's final commit lands, immediately push the branch to `origin`
+(`git push -u origin <branch>` on first push of the branch, plain `git push`
+after that). Do **not** wait to be asked. Pushing is not merging: the branch
+stays unmerged until the supervisor reviews it.
+
+**Why:** the supervisor cannot review work that only exists on the agent's
+local machine, and a single-machine commit is one disk-failure away from
+being lost. Pushing is cheap, non-destructive, and makes the phase commit
+visible. The previous default ("commit, don't push, don't open a PR") was too
+conservative — it conflated "don't merge" (correct) with "don't push" (wrong).
