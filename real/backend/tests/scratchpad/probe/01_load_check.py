@@ -24,44 +24,40 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import torch  # noqa: E402
-from nnsight import LanguageModel  # noqa: E402
 
 from _common import (  # noqa: E402
     MODEL_NAME,
-    pick_device,
-    pick_dtype,
+    REMOTE,
     section,
     ensure_out_dir,
     print_banner,
     write_json,
+    configure_ndif,
+    make_model,
 )
 
 
 def main() -> int:
     ensure_out_dir()
     banner = print_banner()
+    configure_ndif()
 
     section("LOAD MODEL (no forward pass)")
-    device = pick_device()
-    dtype = pick_dtype(device)
     t0 = time.time()
     try:
-        model = LanguageModel(
-            MODEL_NAME,
-            device_map=device,
-            torch_dtype=dtype,
-            attn_implementation="eager",
-        )
+        model = make_model()
     except Exception as e:
         print(f"FAILED to load model: {type(e).__name__}: {e}", file=sys.stderr)
         print(
             "\nIf gated (Llama, Mistral, …): accept the license on HuggingFace "
-            "and `huggingface-cli login`, OR override INFO_FLOW_MODEL=<non-gated>.",
+            "and `huggingface-cli login`, OR override INFO_FLOW_MODEL=<non-gated>.\n"
+            "If remote: ensure NDIF_API_KEY is set and the model is on NDIF "
+            "(see https://nnsight.net/status/).",
             file=sys.stderr,
         )
         return 1
     load_time = time.time() - t0
-    print(f"loaded in {load_time:.1f}s")
+    print(f"loaded in {load_time:.1f}s" + ("  (remote — config only)" if REMOTE else ""))
 
     cfg = model.config
     L = cfg.num_hidden_layers

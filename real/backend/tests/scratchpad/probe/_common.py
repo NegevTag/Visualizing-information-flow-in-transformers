@@ -2,13 +2,19 @@
 Shared config / helpers for the Phase 1 nnsight probe scripts.
 
 Reads environment overrides:
-    INFO_FLOW_MODEL    : HuggingFace model id    (default: meta-llama/Llama-3.2-3B)
-    INFO_FLOW_PROMPT   : input prompt            (default: "The cat sat", 3 content tokens)
+    INFO_FLOW_MODEL    : HuggingFace model id
+                         (default local : meta-llama/Llama-3.2-3B
+                          default remote: meta-llama/Meta-Llama-3.1-8B
+                          — Llama-3.2 isn't on NDIF's hosted list as of writing)
+    INFO_FLOW_PROMPT   : input prompt            (default: "The cat sat")
     INFO_FLOW_DEVICE   : torch device override   (default: auto cuda > mps > cpu)
+    INFO_FLOW_REMOTE   : "1" → use NDIF remote execution
+                         (model runs on NDIF servers; needs NDIF_API_KEY)
+    NDIF_API_KEY       : your NDIF api key (get one at https://login.ndif.us)
 
 Output layout (one directory per model so we can run several models without collision):
     tests/scratchpad/probe/probe_output/<model-slug>/
-        run_config.json     # model / device / dtype / versions snapshot
+        run_config.json     # model / device / dtype / remote-flag / versions
         model_config.json   # L, H, d, d_ff, ...
         manifest.json       # per-tensor stats; rewritten after every save_tensor()
         <name>.pt           # one file per saved tensor (see 02_capture.py)
@@ -29,11 +35,21 @@ import torch
 # Config (env-driven, no CLI args by design — easier to run from any shell)
 # ---------------------------------------------------------------------------
 
-MODEL_NAME: str = os.environ.get("INFO_FLOW_MODEL", "meta-llama/Llama-3.2-3B")
+REMOTE: bool = os.environ.get("INFO_FLOW_REMOTE", "").strip() in {"1", "true", "True", "yes"}
+
+# When using NDIF remotely the default model has to be something the server
+# actually hosts. NDIF currently exposes Llama-3.1 sizes (and DeepSeek), not
+# Llama-3.2; pick a sensible default per mode and let the user override.
+_DEFAULT_LOCAL_MODEL  = "meta-llama/Llama-3.2-3B"
+_DEFAULT_REMOTE_MODEL = "meta-llama/Meta-Llama-3.1-8B"
+MODEL_NAME: str = os.environ.get(
+    "INFO_FLOW_MODEL",
+    _DEFAULT_REMOTE_MODEL if REMOTE else _DEFAULT_LOCAL_MODEL,
+)
 PROMPT: str = os.environ.get("INFO_FLOW_PROMPT", "The cat sat")
 
 _THIS_DIR = Path(__file__).resolve().parent
-MODEL_SLUG = MODEL_NAME.replace("/", "__")
+MODEL_SLUG = MODEL_NAME.replace("/", "__") + ("__remote" if REMOTE else "")
 OUT_DIR: Path = _THIS_DIR / "probe_output" / MODEL_SLUG
 MANIFEST_PATH: Path = OUT_DIR / "manifest.json"
 
@@ -167,6 +183,47 @@ def read_json(name: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# NDIF / remote setup
+# ---------------------------------------------------------------------------
+
+def configure_ndif() -> None:
+    """If REMOTE, push NDIF_API_KEY into nnsight's CONFIG so trace(remote=True) works.
+
+    nnsight 0.7 also auto-picks up NDIF_API_KEY from env, but doing it explicitly
+    here gives a clear, scriptable failure mode (we know exactly what went wrong
+    if the key is missing).
+    """
+    if not REMOTE:
+        return
+    key = os.environ.get("NDIF_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "INFO_FLOW_REMOTE=1 but NDIF_API_KEY is not set. "
+            "Sign up at https://login.ndif.us, then `export NDIF_API_KEY=...` "
+            "or in PowerShell: $env:NDIF_API_KEY = '...'."
+        )
+    from nnsight import CONFIG
+    CONFIG.set_default_api_key(key)
+
+
+def make_model():
+    """Construct a nnsight LanguageModel appropriate for the current mode."""
+    from nnsight import LanguageModel
+    if REMOTE:
+        # On NDIF the device/dtype is whatever the server picked; don't pass them.
+        # attn_implementation likewise — the server hosts a specific build.
+        return LanguageModel(MODEL_NAME)
+    device = pick_device()
+    dtype = pick_dtype(device)
+    return LanguageModel(
+        MODEL_NAME,
+        device_map=device,
+        torch_dtype=dtype,
+        attn_implementation="eager",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Environment / version banner — printed at the top of each script
 # ---------------------------------------------------------------------------
 
@@ -177,9 +234,10 @@ def print_banner() -> dict:
     device = pick_device()
     dtype = pick_dtype(device)
     banner = {
+        "mode": "remote (NDIF)" if REMOTE else "local",
         "model": MODEL_NAME,
-        "device": device,
-        "dtype": str(dtype),
+        "device": "(remote)" if REMOTE else device,
+        "dtype": "(remote)" if REMOTE else str(dtype),
         "prompt": PROMPT,
         "torch": torch.__version__,
         "nnsight": nnsight.__version__,

@@ -33,13 +33,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import torch  # noqa: E402
-from nnsight import LanguageModel  # noqa: E402
 
 from _common import (  # noqa: E402
     MODEL_NAME,
     PROMPT,
-    pick_device,
-    pick_dtype,
+    REMOTE,
     section,
     ensure_out_dir,
     print_banner,
@@ -47,6 +45,8 @@ from _common import (  # noqa: E402
     unwrap_first,
     save_tensor,
     write_json,
+    configure_ndif,
+    make_model,
 )
 
 
@@ -54,25 +54,18 @@ def main() -> int:
     ensure_out_dir()
     banner = print_banner()
     write_json("run_config", banner)
-
-    device = pick_device()
-    dtype = pick_dtype(device)
+    configure_ndif()
 
     # -- Load ---------------------------------------------------------------
     section("LOAD MODEL")
     t0 = time.time()
     try:
-        model = LanguageModel(
-            MODEL_NAME,
-            device_map=device,
-            torch_dtype=dtype,
-            attn_implementation="eager",
-        )
+        model = make_model()
     except Exception as e:
         print(f"FAILED to load model: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
     load_time = time.time() - t0
-    print(f"loaded in {load_time:.1f}s")
+    print(f"loaded in {load_time:.1f}s" + ("  (remote — config only)" if REMOTE else ""))
 
     cfg = model.config
     L = cfg.num_hidden_layers
@@ -110,7 +103,8 @@ def main() -> int:
     final_norm_in_proxy = None
 
     t0 = time.time()
-    with model.trace(PROMPT):  # output_attentions kwarg dropped — see comment above
+    # `remote=True` ships the trace to NDIF; otherwise it runs locally.
+    with model.trace(PROMPT, remote=REMOTE):
         embed_proxy = model.model.embed_tokens.output.save()
         for li in range(L):
             layer = model.model.layers[li]

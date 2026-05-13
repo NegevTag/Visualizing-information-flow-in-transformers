@@ -14,9 +14,12 @@ Three scripts that, together, verify nnsight on a Llama-architecture model expos
 Environment overrides:
 
 ```
-INFO_FLOW_MODEL   default: meta-llama/Llama-3.2-3B   (gated; needs HF login)
-INFO_FLOW_PROMPT  default: "The cat sat"             (3 content tokens)
-INFO_FLOW_DEVICE  default: cuda > mps > cpu
+INFO_FLOW_MODEL   default local : meta-llama/Llama-3.2-3B (gated; needs HF login)
+                  default remote: meta-llama/Meta-Llama-3.1-8B (on NDIF)
+INFO_FLOW_PROMPT  default: "The cat sat" (3 content tokens)
+INFO_FLOW_DEVICE  default: cuda > mps > cpu (ignored in remote mode)
+INFO_FLOW_REMOTE  set to "1" to run on NDIF instead of locally
+NDIF_API_KEY      required when INFO_FLOW_REMOTE=1 — get one at https://login.ndif.us
 ```
 
 From `real/backend/`:
@@ -38,6 +41,34 @@ PowerShell equivalent for env var:
 $env:INFO_FLOW_MODEL = "Qwen/Qwen2.5-0.5B"
 uv run python tests/scratchpad/probe/01_load_check.py
 ```
+
+## Running on NDIF (remote, no local GPU needed)
+
+NDIF hosts the model on their servers. Local memory + compute is essentially zero — only the captured tensors come back. Sign up at `https://login.ndif.us` for a free API key, then:
+
+PowerShell:
+```powershell
+$env:NDIF_API_KEY    = "<your_key>"
+$env:INFO_FLOW_REMOTE = "1"
+$env:INFO_FLOW_MODEL = "meta-llama/Meta-Llama-3.1-8B"
+uv run python tests/scratchpad/probe/01_load_check.py
+uv run python tests/scratchpad/probe/02_capture.py
+uv run python tests/scratchpad/probe/03_inspect.py
+```
+
+bash:
+```bash
+export NDIF_API_KEY="..."
+export INFO_FLOW_REMOTE=1
+export INFO_FLOW_MODEL=meta-llama/Meta-Llama-3.1-8B
+uv run python tests/scratchpad/probe/01_load_check.py
+uv run python tests/scratchpad/probe/02_capture.py
+uv run python tests/scratchpad/probe/03_inspect.py
+```
+
+Caveats:
+- NDIF picks the device/dtype/attn implementation. We can't force `attn_implementation="eager"` remotely, which means the strategy for capturing attention probabilities may differ from the local path.
+- NDIF hosts the Llama-3.1 family + DeepSeek-R1 at time of writing — not Llama-3.2. Check `https://nnsight.net/status/` for the live model list.
 
 ## Running on Colab (GPU)
 
