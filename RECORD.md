@@ -100,14 +100,10 @@ every individual target works.
 
 ### Open Phase-2-relevant items
 
-1. **Attention weights `A^(ℓ,h)_{p,s}`** are not directly captured anywhere.
-   `self_attn.output` returns a single tensor on NDIF (i.e., `output_attentions=True`
-   is silently dropped). Two paths for Phase 2:
-   - reconstruct `A = softmax(QK^T/√d_h + causal_mask)` client-side from
-     captured `q_proj.output` + `k_proj.output`, **after applying RoPE
-     ourselves** (q_proj is pre-rotary in HF Llama).
-   - or probe a deeper hook (e.g., `self_attn.attention_dropout.input` if
-     dropout is a module on NDIF's build) that exposes `A` directly.
+1. ~~**Attention weights `A^(ℓ,h)_{p,s}`** are not directly captured anywhere.~~
+   **CORRECTED below — see "2026-05-13 — Correction".** A *is* directly captured
+   in `self_attn.output[1]`; the earlier claim was an artifact of my own
+   post-processing, not an NDIF or transformers behavior.
 
 2. **Batched trace strategy.** Per-target-isolated traces (~17 round trips
    here, more if per-layer × per-target) is correct but slow. Phase 2 needs
@@ -134,3 +130,78 @@ echoed the NDIF API key into the conversation transcript**. The supervisor
 chose not to rotate. Going forward, credential files are inspected only
 through commands that don't read their *contents* (`ls -la`, `wc -c`,
 `stat`). Lesson logged here so it's not lost.
+
+---
+
+## 2026-05-13 — Correction: A *is* directly captured (my own bug)
+
+When the supervisor asked me how certain I was that the attention-weights gap
+was an NDIF behavior, I went to verify and found I had been wrong on three
+levels at once. Two follow-up probes (`00b_output_attentions.py` and
+`00c_attn_sanity.py`) settle the picture:
+
+- `self_attn.output` on NDIF is **always a 2-tuple** of shape
+  `( Tensor(B, S, d_model), Tensor(B, H_q, S, S) )`. The second element is
+  available regardless of whether `output_attentions=True` is passed to
+  `model.trace(...)`.
+- Sanity checks confirm element `[1]` is the post-softmax causal-masked
+  attention probability matrix `A^(ℓ,h)_{p,s}`: values in `[0, 1]`, row sums
+  ≈ 1 within bf16 noise (±2e-3), strict zero above the diagonal, nonzero
+  counts per row exactly `1, 2, 3, 4` for the 4-token prompt.
+
+So `A^(ℓ,h)` requires **no reconstruction at all** — it's just
+`self_attn.output[1]`. The whole earlier discussion of options (a) client-side
+RoPE+QK^T, (b) deeper hook, (c) inside-the-trace computation is moot.
+
+### Why I had it wrong — three errors stacked
+
+1. **Claim I never tested.** I wrote "NDIF silently drops `output_attentions=True`"
+   in the Phase-1 writeup, but I had not actually run any trace with that flag
+   set on NDIF (the only run that had the flag had failed earlier with the
+   cascade `MissedProviderError`, so I had no observation of what came back).
+2. **Display masked the data I had.** In the original smoke probe
+   (`00_smoke.py`), I post-processed every capture with `unwrap_first(...)`,
+   a helper I'd written for `.input` proxies (which legitimately come back as
+   tuples of positional args). I had lazily applied it to `.output` proxies
+   too. For `self_attn.output`, the captured value was already
+   `(attn_out, attn_weights)` — `unwrap_first` silently discarded
+   `[1]`, the attention weights tensor. The data was there all along.
+3. **Built the next layer of reasoning on the wrong floor.** From the
+   "Tensor(1,4,4096)" the display gave me, I confidently wrote a whole Phase-1
+   caveat with two options and even a recommended (c) option to compute A
+   inside the trace. Every word of that was unnecessary.
+
+### Lesson (corollary to the earlier one)
+
+> **A display function is part of the experiment, not a separate thing.** If
+> the way I report a tensor mutates the tensor (here, `unwrap_first` discards
+> a tuple slot), I will draw conclusions about what's "in" my data that aren't
+> actually about my data — they're about what survived my display. When in
+> doubt, print `type(val)` and `repr(val)` raw, not a "nice" string.
+
+Earlier lesson (Phase-1 writeup) was *don't believe error messages without
+isolating*; this lesson is its sibling — *don't believe success summaries
+without seeing the raw data either*. Both are forms of trusting a layer of
+processing I introduced myself.
+
+### Updated picture for Phase 2
+
+Everything the math doc needs is captured by **two `.save()` calls per layer**
+plus two one-offs:
+
+| Source | What it gives |
+|---|---|
+| `embed_tokens.output`                            | source embeddings `e_p` |
+| `norm.input`                                     | final residual (sanity) |
+| `layers[ℓ].input_layernorm.input`                | `x^(ℓ)_p` |
+| `layers[ℓ].post_attention_layernorm.input`       | post-attn residual |
+| `layers[ℓ].self_attn.output`                     | `[0]` = attn sublayer out, `[1]` = `A^(ℓ,h)` |
+| `layers[ℓ].mlp.act_fn.output`                    | post-SiLU gate `g^(ℓ)_p` |
+
+RMSNorm scales `r^(ℓ,k)_p` are computed from the residual stream at trace
+time (`1 / sqrt(mean(x^2) + eps)`), no separate capture needed.
+
+The only Phase-2 design choice left from the original two open items is the
+**batching strategy** (how many `.save()` calls per `model.trace()`). The
+attention-weights question is closed.
+?
