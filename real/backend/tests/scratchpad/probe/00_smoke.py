@@ -15,7 +15,6 @@ Run:
     uv run python tests/scratchpad/probe/00_smoke.py
 """
 
-from __future__ import annotations
 
 import sys
 import traceback

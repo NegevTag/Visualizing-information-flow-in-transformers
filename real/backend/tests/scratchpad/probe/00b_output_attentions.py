@@ -22,7 +22,6 @@ Run:
     uv run python tests/scratchpad/probe/00b_output_attentions.py
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path

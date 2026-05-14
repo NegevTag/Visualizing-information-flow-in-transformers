@@ -20,7 +20,6 @@ Output layout (one directory per model so we can run several models without coll
         <name>.pt           # one file per saved tensor (see 02_capture.py)
 """
 
-from __future__ import annotations
 
 import json
 import os
@@ -47,6 +46,7 @@ MODEL_NAME: str = os.environ.get(
     _DEFAULT_REMOTE_MODEL if REMOTE else _DEFAULT_LOCAL_MODEL,
 )
 PROMPT: str = os.environ.get("INFO_FLOW_PROMPT", "The cat sat")
+HF_TOKEN: str | None = os.environ.get("HF_TOKEN")
 
 _THIS_DIR = Path(__file__).resolve().parent
 MODEL_SLUG = MODEL_NAME.replace("/", "__") + ("__remote" if REMOTE else "")
@@ -209,17 +209,17 @@ def configure_ndif() -> None:
 def make_model():
     """Construct a nnsight LanguageModel appropriate for the current mode."""
     from nnsight import LanguageModel
+    token_kwargs = {"token": HF_TOKEN} if HF_TOKEN else {}
     if REMOTE:
-        # On NDIF the device/dtype is whatever the server picked; don't pass them.
-        # attn_implementation likewise — the server hosts a specific build.
-        return LanguageModel(MODEL_NAME)
+        return LanguageModel(MODEL_NAME, **token_kwargs)  # type: ignore[arg-type]
     device = pick_device()
     dtype = pick_dtype(device)
-    return LanguageModel(
+    return LanguageModel(  # type: ignore[arg-type]
         MODEL_NAME,
         device_map=device,
         torch_dtype=dtype,
         attn_implementation="eager",
+        **token_kwargs,
     )
 
 

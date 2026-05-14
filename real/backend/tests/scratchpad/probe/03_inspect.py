@@ -11,7 +11,6 @@ Usage:
     INFO_FLOW_MODEL=Qwen/Qwen2.5-0.5B uv run python tests/scratchpad/probe/03_inspect.py
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path

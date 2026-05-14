@@ -23,7 +23,6 @@ written so far is still valid; rerun and it will pick up where it left off
 are not lost).
 """
 
-from __future__ import annotations
 
 import sys
 import time

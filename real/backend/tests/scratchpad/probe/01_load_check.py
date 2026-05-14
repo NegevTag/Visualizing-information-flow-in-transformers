@@ -14,7 +14,6 @@ Does NOT run a forward pass. Run this first if you're not sure auth is set up
 or whether the model fits in memory.
 """
 
-from __future__ import annotations
 
 import sys
 import time

@@ -10,7 +10,6 @@ Captures self_attn.output for layer 0 of Llama-3.1-8B on NDIF, pulls out
 slot [1], and runs the checks. If all three pass → confirmed.
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path
