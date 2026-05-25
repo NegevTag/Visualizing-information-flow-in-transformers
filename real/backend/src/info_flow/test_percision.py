@@ -1,7 +1,8 @@
 from info_flow.config import Config
 from info_flow.ex3_calc_full_contributions import FullRunResults
 from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorRealNorms
-from info_flow.ex5_better_percision_mat_calc import ModelInformationCalculatorNotPerKey
+from info_flow.ex5_better_percision_key_in_mat_calc import ModelInformationCalculatorNotPerKey
+from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32
 import torch
 from info_flow.ex3_calc_full_contributions import ModelInformationCalculator, _get_model
 from info_flow.archive.ex4_full_contribution_f32 import calc_contribution_per_layer_per_residual
@@ -15,16 +16,17 @@ PRECINTILES = (98, 99)
 #"real_norms_calc"
 # not_per_key_calc
 #f32_calc
+#f32_and_mat
 def calc_percision():
     config = Config()
-    information_calculator = ModelInformationCalculatorNotPerKey(model_name=config.info_flow_model, hf_token=config.hf_token)
+    information_calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
     information = information_calculator.calc(BENCHMARK_PROMPT)
-    information.dump("not_per_key_calc")
+    information.dump("f32_and_mat")
     percision = percision_test(information)
     pretty_print_precision(percision)
 
 def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_norm_rel),(mean_norm_rel) p98_elm,p_99_elm,max_norm)
-    result = result.get_f32()
+    result = result.get_f64()
 
     diff_mlp = result.contributions.post_mlp_contribution.sum(dim=2) - result.precise.mlp_residual
     diff_attention = result.contributions.post_attention_contribution.sum(dim=2) - result.precise.attention_residual
@@ -55,10 +57,13 @@ def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_
 
 
 if __name__ == '__main__':
-    # calc_percision()
-    old_method = percision_test(FullRunResults.load('first_test'))
-    new_method = percision_test(FullRunResults.load('f32_calc'))
-    compare_percision(blue=old_method,red=new_method,blue_name='old',red_name='new')
+    information = FullRunResults.load("f32_and_mat")
+    pretty_print_precision(percision_test(information))
+    
+    # old_method = percision_test(FullRunResults.load('f32_calc'))
+    # new_method = percision_test(FullRunResults.load('f32_and_mat'))
+    # print( (old_method[:][1]-new_method[:][1]).sum())
+    # compare_percision(blue=old_method,red=new_method,blue_name='32',red_name='32_and_mat')
     
     
     # config = Config()
