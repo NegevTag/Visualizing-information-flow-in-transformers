@@ -81,32 +81,6 @@ class FullRunResults(BaseModel):
         torch.save(payload, path)
         return path
 
-    def get_f32(self) -> "FullRunResults":
-        return FullRunResults(
-            contributions=Contributions(
-                post_mlp_contribution=self.contributions.post_mlp_contribution.float(),
-                post_attention_contribution=self.contributions.post_attention_contribution.float(),
-            ),
-            precise=ResidualStream(
-                mlp_residual=self.precise.mlp_residual.float(),
-                attention_residual=self.precise.attention_residual.float(),
-            ),
-            dimentions=self.dimentions,
-        )
-
-    def get_f64(self) -> "FullRunResults":
-        return FullRunResults(
-            contributions=Contributions(
-                post_mlp_contribution=self.contributions.post_mlp_contribution.double(),
-                post_attention_contribution=self.contributions.post_attention_contribution.double(),
-            ),
-            precise=ResidualStream(
-                mlp_residual=self.precise.mlp_residual.double(),
-                attention_residual=self.precise.attention_residual.double(),
-            ),
-            dimentions=self.dimentions,
-        )
-
     @classmethod
     def load(cls, key: str) -> "FullRunResults":
         path = LOCAL_STORAGE_DIR / f"{key}.pt"
@@ -138,23 +112,25 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
         def allclose(t1, t2, *, atol=(1e-2) * 2, rtol=(1e-2) * 2):
             return torch.allclose(t1, t2, atol=atol, rtol=rtol)
 
-        def _calculate_mlp_contribution(rms_eps, rms_weight, contribution):  # contribution: (position,source,d_model)
+        def _calculate_mlp_contribution(rms_eps, rms_weight, contribution,real_vectors):  # contribution: (position,source,d_model)
             contribution_f32 = contribution.to(torch.float32)
-            residual_vectors_reconstructed = contribution_f32.sum(dim=1)  # (prompt_len,d_model)
-            ms = residual_vectors_reconstructed.pow(2).mean(dim=-1)
+            real_vectors_f32 = real_vectors.to(torch.float32)
+            ms = real_vectors_f32.pow(2).mean(dim=-1)
             rms_factor = torch.rsqrt(ms + rms_eps)  # (prompt_len)
             rms_factor_reshaped = ein.rearrange(rms_factor, "pl -> pl 1 1")  # (prompt_len,1 ,1)
             return rms_weight * (rms_factor_reshaped * contribution_f32).to(contribution.dtype)
 
-        def caclulate_post_rmsnorm1_contribution(layer, post_mlp_contribution) -> torch.Tensor:  # post_mlp_layer_contribution: (position,source,d_model)
+        def caclulate_post_rmsnorm1_contribution(layer, post_mlp_contribution,) -> torch.Tensor:  # post_mlp_layer_contribution: (position,source,d_model)
+            real_vectors = layer.input_layernorm.input[0]
             rms_weight = layer.input_layernorm.weight
             rms_eps = model.model.config.rms_norm_eps
-            return _calculate_mlp_contribution(rms_eps, rms_weight, post_mlp_contribution)
+            return _calculate_mlp_contribution(rms_eps, rms_weight, post_mlp_contribution,real_vectors)
 
-        def calc_post_rmsnorm2(layer, post_attention_contibutions) -> torch.Tensor:  # per_residual_contribution  (position,source,d_model)
+        def calc_post_rmsnorm2(layer, post_attention_contibutions) -> torch.Tensor:  # per_rsidual_contribution  (position,source,d_model)
+            real_vectors = layer.post_attention_layernorm.input[0]
             rms_weight = layer.post_attention_layernorm.weight  # (d_model)
             rms_eps = model.model.config.rms_norm_eps
-            return _calculate_mlp_contribution(rms_eps, rms_weight, post_attention_contibutions)
+            return _calculate_mlp_contribution(rms_eps, rms_weight, post_attention_contibutions,real_vectors)
 
         embed = model.model.embed_tokens.output.save()[0]  # (seq_len, d_model)
         PROMPT_LEN = len(embed)
@@ -216,7 +192,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
     return (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
-class ModelInformationCalculator:
+class ModelInformationCalculatorRealNorms:
     def __init__(self, model_name: str, hf_token: str, remote: bool | str = True) -> None:
         self.model = _get_model(model_name, hf_token)
         self.remote = remote
