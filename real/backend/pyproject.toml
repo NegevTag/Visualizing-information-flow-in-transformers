@@ -9,6 +9,7 @@ dependencies = [
     "transformers>=4.45",
     "accelerate>=0.34",
     "jaxtyping>=0.2",
+    "einops>=0.8.2",
 ]
 
 [project.optional-dependencies]
@@ -24,3 +25,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/info_flow"]
+
+[tool.ruff]
+line-length = 180
+
+[dependency-groups]
+dev = [
+    "icecream>=2.2.0",
+]

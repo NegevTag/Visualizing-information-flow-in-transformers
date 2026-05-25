@@ -3,7 +3,27 @@
     "allow": [
       "PowerShell(cmd /c \"where latexmk\" 2>&1)",
       "PowerShell(cmd /c \"where pdflatex\" 2>&1)",
-      "Bash(dir \"C:\\\\Users\\\\wildn\\\\.claude\\\\plans\")"
+      "Bash(dir \"C:\\\\Users\\\\wildn\\\\.claude\\\\plans\")",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git mv *)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npm run *)",
+      "Bash(git merge --no-ff phase/0-repo-hygiene -m ' *)",
+      "Bash(dir C:\\\\Users\\\\wildn\\\\Desktop\\\\New life\\\\AI\\\\Expirments\\\\VisulaiztionInfoFlowDemo *)",
+      "Bash(uv run *)",
+      "Bash(mkdir -p \"c:\\\\Users\\\\wildn\\\\Desktop\\\\New life\\\\AI\\\\Expirments\\\\VisulaiztionInfoFlowDemo\\\\nnsight_pr\")",
+      "WebSearch",
+      "WebFetch(domain:nnsight.net)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git check-ignore *)",
+      "Bash(.venv/Scripts/python.exe -c ' *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\wildn\\Desktop\\New life\\AI\\Expirments\\VisulaiztionInfoFlowDemo"
     ]
   }
 }

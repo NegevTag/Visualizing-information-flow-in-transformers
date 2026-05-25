@@ -14,7 +14,7 @@ top-level `RECORD.md` under the 2026-05-13 entries.
 | Component | Value |
 |---|---|
 | Model | `meta-llama/Meta-Llama-3.1-8B` |
-| Execution | **remote on NDIF** (`INFO_FLOW_REMOTE=1`, `model.trace(..., remote=True)`) |
+| Execution | **remote on NDIF** (`?INFO_FLOW_REMOTE=1`, `model.trace(..., remote=True)`) |
 | Prompt | `"The cat sat"` (4 tokens after Llama-3 tokenization) |
 | nnsight | 0.7.0 |
 | transformers | 5.8.1 |
