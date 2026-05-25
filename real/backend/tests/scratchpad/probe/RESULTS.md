@@ -17,7 +17,7 @@ top-level `RECORD.md` under the 2026-05-13 entries.
 | Execution | **remote on NDIF** (`?INFO_FLOW_REMOTE=1`, `model.trace(..., remote=True)`) |
 | Prompt | `"The cat sat"` (4 tokens after Llama-3 tokenization) |
 | nnsight | 0.7.0 |
-| transformers | 5.8.1 |
+| tra?nsformers | 5.8.1 |
 | torch | 2.12.0+cpu |
 | Local device | CPU (no GPU); irrelevant for remote runs |
 

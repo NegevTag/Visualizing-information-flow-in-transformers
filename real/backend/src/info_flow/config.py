@@ -12,8 +12,8 @@ class Config(BaseSettings):
     ndif_api_key: str
     info_flow_model: str
 
-    default_atol: float = 1e-2
-    default_rtol: float = 1e-2
+    default_atol: float
+    default_rtol: float
 
     model_config = model_config
     
