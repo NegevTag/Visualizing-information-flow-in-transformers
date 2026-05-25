@@ -1,28 +1,30 @@
-import typing
-
 from info_flow.config import Config
 from info_flow.ex3_calc_full_contributions import FullRunResults
+from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorRealNorms
+from info_flow.ex5_better_percision_mat_calc import ModelInformationCalculatorNotPerKey
 import torch
-from rich.console import Console
-from rich.table import Table
 from info_flow.ex3_calc_full_contributions import ModelInformationCalculator, _get_model
+from info_flow.archive.ex4_full_contribution_f32 import calc_contribution_per_layer_per_residual
+from info_flow.precision_visualization import PrecisionResults, compare_percision, pretty_print_precision
 
 NORM_FLOOR = 1
 BENCHMARK_PROMPT = "The cat sat on the mat, and then afterword, he decided that "
 PRECINTILES = (98, 99)
 
-PrecisionResults = typing.NewType("PrecisionResults", torch.Tensor)
-
-
+# "first_test"
+#"real_norms_calc"
+# not_per_key_calc
+#f32_calc
 def calc_percision():
     config = Config()
-    # information_calculator = ModelInformationCalculator(model_name=config.info_flow_model, hf_token=config.hf_token)
-    # information = information_calculator.calc(BENCHMARK_PROMPT)
-    information = FullRunResults.load("first_test")
+    information_calculator = ModelInformationCalculatorNotPerKey(model_name=config.info_flow_model, hf_token=config.hf_token)
+    information = information_calculator.calc(BENCHMARK_PROMPT)
+    information.dump("not_per_key_calc")
     percision = percision_test(information)
     pretty_print_precision(percision)
 
 def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_norm_rel),(mean_norm_rel) p98_elm,p_99_elm,max_norm)
+    result = result.get_f32()
 
     diff_mlp = result.contributions.post_mlp_contribution.sum(dim=2) - result.precise.mlp_residual
     diff_attention = result.contributions.post_attention_contribution.sum(dim=2) - result.precise.attention_residual
@@ -38,7 +40,7 @@ def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_
 
     mlp_residual_sizes = result.precise.mlp_residual.abs()
     attention_residual_sizes = result.precise.attention_residual.abs()
-    
+
     relative_diff_mlp = diff_mlp.abs() / torch.clamp(mlp_residual_sizes, float(NORM_FLOOR))
     relative_diff_attention = diff_attention.abs() / torch.clamp(attention_residual_sizes, float(NORM_FLOOR))
 
@@ -52,15 +54,21 @@ def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_
     return torch.stack([max_diff_norm_rel, mean_diff_norms_rel, realtive_dif_p98, realtive_dif_p99, relaitive_diff_max],dim=-1)
 
 
-def pretty_print_precision(results: PrecisionResults) -> None:
-    """Pretty-print a (Layer, 5) precision tensor with columns:
-    max_norm_rel, mean_norm_rel, p98_elm, p99_elm, max_elm."""
-
-    from rich.table import Column
-    cols = ["layer", "max_norm_rel", "mean_norm_rel", "p98_elm", "p99_elm", "max_elm"]
-    table = Table(*[Column(c, header_style="none") for c in cols], show_lines=False)
-    for layer_idx, row in enumerate(results):
-        table.add_row(str(layer_idx), *[f"{v.item():.5f}" for v in row])
-    Console().print(table)
 if __name__ == '__main__':
-    calc_percision()
+    # calc_percision()
+    old_method = percision_test(FullRunResults.load('first_test'))
+    new_method = percision_test(FullRunResults.load('f32_calc'))
+    compare_percision(blue=old_method,red=new_method,blue_name='old',red_name='new')
+    
+    
+    # config = Config()
+    # information_calculator = ModelInformationCalculatorNotPerKey(model_name=config.info_flow_model, hf_token=config.hf_token)
+    # information = FullRunResults.load("first_test")
+    # calc_f32 = calc_contribution_per_layer_per_residual(model= information_calculator.model,prompt= BENCHMARK_PROMPT)
+    # information.contributions.post_mlp_contribution = calc_f32[0].float()
+    # information.contributions.post_attention_contribution = calc_f32[1].float()
+    # information.precise.mlp_residual = information.precise.mlp_residual.float()
+    # information.precise.attention_residual = information.precise.attention_residual.float()
+    # information.dump("f32_calc")
+    # f32_precision = percision_test(information)
+    # pretty_print_precision(f32_precision)

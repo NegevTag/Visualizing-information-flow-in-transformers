@@ -10,6 +10,7 @@ dependencies = [
     "accelerate>=0.34",
     "jaxtyping>=0.2",
     "einops>=0.8.2",
+    "matplotlib>=3.10.9",
 ]
 
 [project.optional-dependencies]

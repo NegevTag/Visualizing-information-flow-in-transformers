@@ -42,9 +42,8 @@ class Contributions(BaseModel):
 class ResidualStream(BaseModel):
     mlp_residual: Tensor  # (layer,position,d_model)
     attention_residual: Tensor  # (layer,position,d_model)
-    
-    model_config = SettingsConfigDict(arbitrary_types_allowed=True)
 
+    model_config = SettingsConfigDict(arbitrary_types_allowed=True)
 
 
 class ResultsDimentions(BaseModel):
@@ -80,19 +79,6 @@ class FullRunResults(BaseModel):
         }
         torch.save(payload, path)
         return path
-
-    def get_f32(self) -> "FullRunResults":
-        return FullRunResults(
-            contributions=Contributions(
-                post_mlp_contribution=self.contributions.post_mlp_contribution.float(),
-                post_attention_contribution=self.contributions.post_attention_contribution.float(),
-            ),
-            precise=ResidualStream(
-                mlp_residual=self.precise.mlp_residual.float(),
-                attention_residual=self.precise.attention_residual.float(),
-            ),
-            dimentions=self.dimentions,
-        )
 
     @classmethod
     def load(cls, key: str) -> "FullRunResults":
@@ -170,18 +156,21 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
 
             print("RMS_NORM1 ok")
             print(f"post Rms1 shape {post_rmssnorm1_contribution.shape}")
-            attention_ouput_per_source = torch.zeros((PROMPT_LEN, PROMPT_LEN, PROMPT_LEN, D_MODEL), device=device, dtype=dtype).save()  # (position(query),key,source,d_model)
+            attention_ouput_per_source = torch.zeros((PROMPT_LEN, PROMPT_LEN, D_MODEL), device=device, dtype=dtype).save()  # (position(query),source,d_model)
             attn_pattern = layer.self_attn.output[1][0]  # (H_q,prompt_len(query),prompt_len(key)) post softmax
             for q_residual in range(PROMPT_LEN):
-                for k_residual in range(q_residual + 1):
-                    per_head_key_v = W_V @ post_rmssnorm1_contribution[k_residual].T  # (H_kv * d_v,prompt_len (source)) = (Hkv*d_v,d_model) x (d_mode,prompt_len(source))
-                    reshped_to_per_query_v = ein.repeat(per_head_key_v, "(H_kv d_v) pl  -> d_v (H_kv r) pl", d_v=D_V, r=heads_ratio)  # (d_v,H_q, prompt_len)
-                    # (d_v,H_q,p_len)
-                    post_attention_per_query_v = reshped_to_per_query_v * attn_pattern[:, q_residual, k_residual].unsqueeze(-1)  ## (d_v,H_q,p_len)= ((d_v, H_q , prompt_len)* (H_q ,1)
-                    flatten_post_attention_per_query_v = ein.rearrange(post_attention_per_query_v, "d_v H_q pl -> (H_q d_v) pl")  # (H_q * d_v, p_len)
-                    attention_ouput_per_source[q_residual][k_residual] = (W_O @ flatten_post_attention_per_query_v).T  # (p_len,d) = ((d, H_q* d_v) x (H_q * d_v, p_len))^T
+                per_head_key_v = post_rmssnorm1_contribution @ W_V.T  # (key,prompt_len (source),H_kv * d_v) =  (key,prompt_len(source),d_model) x (d_model,Hkv*dv)
+                reshped_to_per_query_v = ein.repeat(per_head_key_v, "key pl (H_kv d_v)-> d_v (H_kv r) key pl", d_v=D_V, r=heads_ratio)  # (d_v,H_q,p_len(key),p_len(source))
 
-            post_attention_contribution[l] = attention_ouput_per_source.sum(dim=1) + post_mlp_contribution[l]  # (layer,position,source,d_model)
+                post_attention_per_query_v = reshped_to_per_query_v * attn_pattern[:, q_residual, :].unsqueeze(-1)  # (d_v,H_q,p_len(key),p_len(source)= (keyd_v, H_q , prompt_len(key),P_len(source))* (H_q ,p_len(key), 1)
+                print(f"post_attention_per_query_v {post_attention_per_query_v.shape}")
+                post_attention_per_query_v = post_attention_per_query_v.sum(dim=-2)  # (d_v,H_q,p_len(source))
+                print(f"shape after sum {post_attention_per_query_v.shape}")
+                flatten_post_attention_per_query_v = ein.rearrange(post_attention_per_query_v, "d_v H_q pl -> (H_q d_v) pl")  # (H_q * d_v, p_len(source))
+                attention_ouput_per_source[q_residual] = (W_O @ flatten_post_attention_per_query_v).T  # (p_len(source),d) = ((d, H_q* d_v) x (H_q * d_v, p_len(source)))^T
+
+            print(f"addition shape{(attention_ouput_per_source + post_mlp_contribution[l]).shape}")
+            post_attention_contribution[l] = attention_ouput_per_source + post_mlp_contribution[l]  # (layer,position,source,d_model)
             post_rms_norm2_contribution = calc_post_rmsnorm2(layer, post_attention_contribution[l])  # (position,source,d_model)
 
             real_attention_residual[l] = layer.post_attention_layernorm.input[0].save()  # (layer,p_len,d_model) for percision calcuations
@@ -203,7 +192,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
     return (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
-class ModelInformationCalculator:
+class ModelInformationCalculatorNotPerKey:
     def __init__(self, model_name: str, hf_token: str, remote: bool | str = True) -> None:
         self.model = _get_model(model_name, hf_token)
         self.remote = remote

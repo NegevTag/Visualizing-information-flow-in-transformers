@@ -10,7 +10,7 @@ Run:
     uv run python tests/scratchpad/toy_compile_check.py
 """
 
-from info_flow.ex3_calc_full_contributions import calc_contribution_per_layer_per_residual
+from info_flow.ex5_better_percision_mat_calc import calc_contribution_per_layer_per_residual
 
 from toy_llama import ToyLlama
 
