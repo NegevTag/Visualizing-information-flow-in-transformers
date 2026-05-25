@@ -15,4 +15,4 @@ $$\operatorname{MLP}(x_p) = W_{\mathrm{down}}\Bigl(\operatorname{SiLU}(W_{\mathr
 where $\operatorname{SiLU}(z) = z \cdot \sigma(z)$.
 
 Three projections: $W_{\mathrm{gate}}$ and $W_{\mathrm{up}}$ both map $\mathbb{R}^d \to \mathbb{R}^{d_{\mathrm{ff}}}$, their outputs are multiplied element-wise (the gate controls how much of $W_{\mathrm{up}} x_p$ passes through), then $W_{\mathrm{down}}$ maps back $\mathbb{R}^{d_{\mathrm{ff}}} \to \mathbb{R}^d$.
-$g^{(\ell)}p \in \mathbb{R}^{d{\mathrm{ff}}}$,
+$g^{(\ell)}p \in \mathbb{R}^{d{\mathrm{ff}}}$,/
