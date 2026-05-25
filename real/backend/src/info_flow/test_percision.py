@@ -4,8 +4,6 @@ from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorReal
 from info_flow.ex5_better_percision_key_in_mat_calc import ModelInformationCalculatorNotPerKey
 from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32
 import torch
-from info_flow.ex3_calc_full_contributions import ModelInformationCalculator, _get_model
-from info_flow.archive.ex4_full_contribution_f32 import calc_contribution_per_layer_per_residual
 from info_flow.precision_visualization import PrecisionResults, compare_percision, pretty_print_precision
 
 NORM_FLOOR = 1
@@ -22,7 +20,7 @@ PRECINTILES = (98, 99)
 def calc_percision():
     config = Config()
     information_calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
-    information = information_calculator.calc(BENCHMARK_PROMPT)
+    information = information_calculator.calc("The cat sat on the mat but he didnt")
     information.dump("f32_and_mat_logits_no_trailing_space")
     # percision = percision_test(information)
     # pretty_print_precision(percision)
@@ -59,15 +57,15 @@ def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_
 
 
 if __name__ == '__main__':
-    # calc_percision()
-    config = Config()
-    calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
-    information = FullRunResults.load("f32_and_mat_logits_no_trailing_space")
-    tokens = calculator.calc_tokens(BENCHMARK_PROMPT)
-    print(tokens)
-    index = -1
-    print(tokens[index])
-    print(calculator.tokens_probabilities_from_logits(information.logits[-1]))
+    calc_percision()
+    # config = Config()
+    # calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
+    # information = FullRunResults.load("f32_and_mat_logits_no_trailing_space")
+    # tokens = calculator.calc_tokens(BENCHMARK_PROMPT)
+    # print(tokens)
+    # index = -1
+    # print(tokens[index])
+    # print(calculator.tokens_probabilities_from_logits(information.logits[-1]))
     
     # old_method = percision_test(FullRunResults.load('f32_calc'))
     # new_method = percision_test(FullRunResults.load('f32_and_mat'))
