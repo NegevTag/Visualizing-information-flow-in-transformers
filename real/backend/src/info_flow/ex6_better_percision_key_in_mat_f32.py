@@ -58,6 +58,7 @@ LOCAL_STORAGE_DIR = Path(__file__).resolve().parent / "local_storage"
 
 
 class FullRunResults(BaseModel):
+    toknes: list[str]
     contributions: Contributions
     precise: ResidualStream
     dimentions: ResultsDimentions
@@ -99,6 +100,7 @@ class FullRunResults(BaseModel):
                 d_model=payload["d_model"],
             ),
         )
+
     def get_f64(self) -> "FullRunResults":
         return FullRunResults(
             contributions=Contributions(
@@ -118,6 +120,9 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
     D_MODEL = model.model.config.hidden_size
     D_V = model.model.config.head_dim
     heads_ratio = model.model.config.num_attention_heads // model.model.config.num_key_value_heads
+    tokens_ids = model.tokenizer(prompt)["input_ids"]
+    tokens = [model.tokenizer.decode([id]) for id in tokens_ids]
+    
     with model.trace(prompt, remote=remote):
 
         def allclose(t1, t2, *, atol=(1e-2) * 2, rtol=(1e-2) * 2):
@@ -201,7 +206,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             post_mlp_contribution[l + 1] = mlp_contribution + post_attention_contribution[l]
             real_mlp_residual[l] = layer.output[0].save()  # (layer,p_len,d_model)
 
-    return (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
+    return tokens, (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
 class ModelInformationCalculatorF32:
@@ -210,8 +215,8 @@ class ModelInformationCalculatorF32:
         self.remote = remote
 
     def calc(self, prompt: str) -> FullRunResults:
-        (post_mlp_contribution, post_attention_contribution), (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt)
+        tokens, (post_mlp_contribution, post_attention_contribution), (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt)
         contributiutions = Contributions(post_mlp_contribution=post_mlp_contribution, post_attention_contribution=post_attention_contribution)
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
         info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
-        return FullRunResults(contributions=contributiutions, precise=precise, dimentions=info_dimentions)
+        return FullRunResults(tokens = tokens, contributions=contributiutions, precise=precise, dimentions=info_dimentions)
