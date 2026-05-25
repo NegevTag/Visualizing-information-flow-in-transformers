@@ -36,22 +36,70 @@ class Contributions(BaseModel):
     post_mlp_contribution: Tensor  # (layer,position,source,d_model)
     post_attention_contribution: Tensor  # (layer,position,source,d_model)
 
+    model_config = SettingsConfigDict(arbitrary_types_allowed=True)
+
 
 class ResidualStream(BaseModel):
     mlp_residual: Tensor  # (layer,position,d_model)
     attention_residual: Tensor  # (layer,position,d_model)
+    
+    model_config = SettingsConfigDict(arbitrary_types_allowed=True)
+
+
 
 class ResultsDimentions(BaseModel):
-    layers:int
-    prompt_len:int
+    layers: int
+    prompt_len: int
     d_model: int
-    
+
+    model_config = SettingsConfigDict(arbitrary_types_allowed=True)
+
+
+LOCAL_STORAGE_DIR = Path(__file__).resolve().parent / "local_storage"
+
+
 class FullRunResults(BaseModel):
     contributions: Contributions
     precise: ResidualStream
     dimentions: ResultsDimentions
 
     model_config = SettingsConfigDict(arbitrary_types_allowed=True)
+
+    def dump(self, key: str) -> Path:
+        # serialize tensors + scalars to a single .pt file keyed by `key`
+        LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        path = LOCAL_STORAGE_DIR / f"{key}.pt"
+        payload = {
+            "post_mlp_contribution": self.contributions.post_mlp_contribution,
+            "post_attention_contribution": self.contributions.post_attention_contribution,
+            "mlp_residual": self.precise.mlp_residual,
+            "attention_residual": self.precise.attention_residual,
+            "layers": self.dimentions.layers,
+            "prompt_len": self.dimentions.prompt_len,
+            "d_model": self.dimentions.d_model,
+        }
+        torch.save(payload, path)
+        return path
+
+    @classmethod
+    def load(cls, key: str) -> "FullRunResults":
+        path = LOCAL_STORAGE_DIR / f"{key}.pt"
+        payload = torch.load(path, weights_only=False)
+        return cls(
+            contributions=Contributions(
+                post_mlp_contribution=payload["post_mlp_contribution"],
+                post_attention_contribution=payload["post_attention_contribution"],
+            ),
+            precise=ResidualStream(
+                mlp_residual=payload["mlp_residual"],
+                attention_residual=payload["attention_residual"],
+            ),
+            dimentions=ResultsDimentions(
+                layers=payload["layers"],
+                prompt_len=payload["prompt_len"],
+                d_model=payload["d_model"],
+            ),
+        )
 
 
 def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, prompt: str, remote: bool | str = True):  # ->(layer,position,source,d_model), (layer,position,source,d_model)
@@ -143,13 +191,13 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
 
 
 class ModelInformationCalculator:
-    def __init__(self, model: nnsight.LanguageModel, remote: bool | str = True) -> None:
-        self.model = model
+    def __init__(self, model_name: str, hf_token: str, remote: bool | str = True) -> None:
+        self.model = _get_model(model_name, hf_token)
         self.remote = remote
 
     def calc(self, prompt: str) -> FullRunResults:
         (post_mlp_contribution, post_attention_contribution), (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt)
         contributiutions = Contributions(post_mlp_contribution=post_mlp_contribution, post_attention_contribution=post_attention_contribution)
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
-        info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0],prompt_len=real_attention_residual.shape[1],d_model=real_attention_residual.shape[2])
-        return FullRunResults(contributions=contributiutions, precise=precise,dimentions=info_dimentions)
+        info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
+        return FullRunResults(contributions=contributiutions, precise=precise, dimentions=info_dimentions)
