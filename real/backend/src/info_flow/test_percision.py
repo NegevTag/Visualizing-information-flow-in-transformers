@@ -1,5 +1,5 @@
 from info_flow.config import Config
-from info_flow.ex3_calc_full_contributions import FullRunResults
+from info_flow.ex6_better_percision_key_in_mat_f32 import FullRunResults
 from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorRealNorms
 from info_flow.ex5_better_percision_key_in_mat_calc import ModelInformationCalculatorNotPerKey
 from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32
@@ -9,7 +9,7 @@ from info_flow.archive.ex4_full_contribution_f32 import calc_contribution_per_la
 from info_flow.precision_visualization import PrecisionResults, compare_percision, pretty_print_precision
 
 NORM_FLOOR = 1
-BENCHMARK_PROMPT = "The cat sat on the mat, and then afterword, he decided that "
+BENCHMARK_PROMPT = "The cat sat on the mat, and then afterword, he decided that"
 PRECINTILES = (98, 99)
 
 # "first_test"
@@ -17,13 +17,15 @@ PRECINTILES = (98, 99)
 # not_per_key_calc
 #f32_calc
 #f32_and_mat
+#f32_and_mat_logits
+#f32_and_mat_logits_no_trailing_space
 def calc_percision():
     config = Config()
     information_calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
     information = information_calculator.calc(BENCHMARK_PROMPT)
-    information.dump("f32_and_mat")
-    percision = percision_test(information)
-    pretty_print_precision(percision)
+    information.dump("f32_and_mat_logits_no_trailing_space")
+    # percision = percision_test(information)
+    # pretty_print_precision(percision)
 
 def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_norm_rel),(mean_norm_rel) p98_elm,p_99_elm,max_norm)
     result = result.get_f64()
@@ -57,8 +59,15 @@ def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_
 
 
 if __name__ == '__main__':
-    information = FullRunResults.load("f32_and_mat")
-    pretty_print_precision(percision_test(information))
+    # calc_percision()
+    config = Config()
+    calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
+    information = FullRunResults.load("f32_and_mat_logits_no_trailing_space")
+    tokens = calculator.calc_tokens(BENCHMARK_PROMPT)
+    print(tokens)
+    index = -1
+    print(tokens[index])
+    print(calculator.tokens_probabilities_from_logits(information.logits[-1]))
     
     # old_method = percision_test(FullRunResults.load('f32_calc'))
     # new_method = percision_test(FullRunResults.load('f32_and_mat'))

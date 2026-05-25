@@ -3,6 +3,7 @@
 
 from enum import Enum
 import math
+from typing import OrderedDict
 
 import nnsight
 from pathlib import Path
@@ -58,7 +59,7 @@ LOCAL_STORAGE_DIR = Path(__file__).resolve().parent / "local_storage"
 
 
 class FullRunResults(BaseModel):
-    toknes: list[str]
+    logits: torch.Tensor  # (p_len,vocab_size)
     contributions: Contributions
     precise: ResidualStream
     dimentions: ResultsDimentions
@@ -70,6 +71,7 @@ class FullRunResults(BaseModel):
         LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         path = LOCAL_STORAGE_DIR / f"{key}.pt"
         payload = {
+            "logits": self.logits,
             "post_mlp_contribution": self.contributions.post_mlp_contribution,
             "post_attention_contribution": self.contributions.post_attention_contribution,
             "mlp_residual": self.precise.mlp_residual,
@@ -86,6 +88,7 @@ class FullRunResults(BaseModel):
         path = LOCAL_STORAGE_DIR / f"{key}.pt"
         payload = torch.load(path, weights_only=False)
         return cls(
+            logits=payload["logits"],
             contributions=Contributions(
                 post_mlp_contribution=payload["post_mlp_contribution"],
                 post_attention_contribution=payload["post_attention_contribution"],
@@ -103,6 +106,7 @@ class FullRunResults(BaseModel):
 
     def get_f64(self) -> "FullRunResults":
         return FullRunResults(
+            logits=self.logits.double(),
             contributions=Contributions(
                 post_mlp_contribution=self.contributions.post_mlp_contribution.double(),
                 post_attention_contribution=self.contributions.post_attention_contribution.double(),
@@ -120,9 +124,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
     D_MODEL = model.model.config.hidden_size
     D_V = model.model.config.head_dim
     heads_ratio = model.model.config.num_attention_heads // model.model.config.num_key_value_heads
-    tokens_ids = model.tokenizer(prompt)["input_ids"]
-    tokens = [model.tokenizer.decode([id]) for id in tokens_ids]
-    
+
     with model.trace(prompt, remote=remote):
 
         def allclose(t1, t2, *, atol=(1e-2) * 2, rtol=(1e-2) * 2):
@@ -143,6 +145,11 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
 
         def calc_post_rmsnorm2(layer, post_attention_contibutions) -> torch.Tensor:  # per_residual_contribution  (position,source,d_model)
             rms_weight = layer.post_attention_layernorm.weight.float()  # (d_model)
+            rms_eps = model.model.config.rms_norm_eps
+            return _calculate_mlp_contribution(rms_eps, rms_weight, post_attention_contibutions)
+
+        def calc_post_rms_last(post_attention_contibutions):
+            rms_weight = model.model.norm.weight.float()
             rms_eps = model.model.config.rms_norm_eps
             return _calculate_mlp_contribution(rms_eps, rms_weight, post_attention_contibutions)
 
@@ -203,20 +210,40 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             W_down = layer.mlp.down_proj.weight.float()  # (d_model,d_mlp)
             mlp_contribution = upscale_g_contribution @ W_down.T  # (position,source,d_model) = (position,source,d_mlp) x (d_mlp,d_model)
 
-            post_mlp_contribution[l + 1] = mlp_contribution + post_attention_contribution[l]
+            post_mlp_contribution[l + 1] = mlp_contribution + post_attention_contribution[l]  # (layer,position,source,d_model)
             real_mlp_residual[l] = layer.output[0].save()  # (layer,p_len,d_model)
 
-    return tokens, (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
+        # output
+        post_last_rms = calc_post_rms_last(post_mlp_contribution[l + 1]).sum(dim=-2)  # (position,d_model)
+        W_lm = model.lm_head.weight  # (vocab_size,d_model)
+        logits = (W_lm @ post_last_rms.to(torch.bfloat16).T).save()  # (vocab_size,p_len)
+        logits = logits.T.save()  # (p_len,vocab_size)
+        print(f"logits shape{logits.shape}")
+
+    return (post_mlp_contribution[1:], post_attention_contribution), logits, (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
 class ModelInformationCalculatorF32:
     def __init__(self, model_name: str, hf_token: str, remote: bool | str = True) -> None:
         self.model = _get_model(model_name, hf_token)
+        self.tokenizer = self.model.tokenizer
+        self.tokenizer.clean_up_tokenization_spaces = False
         self.remote = remote
 
     def calc(self, prompt: str) -> FullRunResults:
-        tokens, (post_mlp_contribution, post_attention_contribution), (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt)
+        (post_mlp_contribution, post_attention_contribution), logits, (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt)
         contributiutions = Contributions(post_mlp_contribution=post_mlp_contribution, post_attention_contribution=post_attention_contribution)
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
         info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
-        return FullRunResults(tokens = tokens, contributions=contributiutions, precise=precise, dimentions=info_dimentions)
+        return FullRunResults(contributions=contributiutions, logits=logits, precise=precise, dimentions=info_dimentions)
+
+    def calc_tokens(self, prompt: str) -> list[str]:
+        tokens_ids = self.tokenizer(prompt)["input_ids"]
+        return [self.tokenizer.decode([id]) for id in tokens_ids]
+
+    def tokens_probabilities_from_logits(self, single_logits: torch.Tensor, min_prob=0.04) -> dict[str, float]:  # logits: (vocab_size) return dict[token->prob]
+        probabilities = torch.softmax(single_logits, dim=-1)
+        ids_probabilities = sorted(list(enumerate(probabilities.tolist())),key= lambda p_id: p_id[1],reverse=True)
+        print(ids_probabilities[140])
+        filtered_probabilities = [i_p for i_p in ids_probabilities if i_p[1] >= min_prob]
+        return OrderedDict({self.tokenizer.decode([id]): probability for id, probability in filtered_probabilities})
