@@ -1,5 +1,5 @@
-
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from info_flow.config import Config
 from tests.scratchpad.toy_llama_no_attention_no_ov import ToyLlamaNoAttentionNoOV
 from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32
@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import uvicorn
 
 app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 class ReturnInfo(BaseModel):
@@ -29,7 +30,7 @@ def calc_norms(prompt: str):
 @app.get("/toy_model")
 def calc_norms(prompt: str):
     config = Config()
-    calculator = ModelInformationCalculatorF32(config.info_flow_model, config.hf_token)
+    calculator = ModelInformationCalculatorF32(config.info_flow_model, config.hf_token, remote="local")
     calculator.model = ToyLlamaNoAttentionNoOV.build_nnsight_mode()
     tokens = calculator.calc_tokens(prompt)
     information = calculator.calc(prompt)

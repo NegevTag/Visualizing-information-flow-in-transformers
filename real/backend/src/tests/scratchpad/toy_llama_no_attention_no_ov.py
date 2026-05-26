@@ -19,6 +19,16 @@ import nnsight
 
 # Toy llama move delete
 class ToyLlamaNoAttentionNoOV(ToyLlama):
+    DEFAULT_CONFIG = dict(
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=10,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        max_position_embeddings=64,
+        rms_norm_eps=1e-6,
+        attn_implementation="eager",
+    )
     """Builder for a tiny Llama wrapped in nnsight.LanguageModel."""
     @classmethod
     def build_hf_model(cls, config_overrides, tokenizer):
