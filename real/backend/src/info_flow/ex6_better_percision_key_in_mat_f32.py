@@ -230,7 +230,7 @@ class ModelInformationCalculatorF32:
         self.remote = remote
 
     def calc(self, prompt: str) -> FullRunResults:
-        (post_mlp_contribution, post_attention_contribution), logits, (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt)
+        (post_mlp_contribution, post_attention_contribution), logits, (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt, remote=self.remote)
         contributiutions = Contributions(post_mlp_contribution=post_mlp_contribution, post_attention_contribution=post_attention_contribution)
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
         info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
@@ -242,7 +242,7 @@ class ModelInformationCalculatorF32:
 
     def tokens_probabilities_from_logits(self, single_logits: torch.Tensor, min_prob=0.04) -> dict[str, float]:  # logits: (vocab_size) return dict[token->prob]
         probabilities = torch.softmax(single_logits, dim=-1)
-        ids_probabilities = sorted(list(enumerate(probabilities.tolist())),key= lambda p_id: p_id[1],reverse=True)
+        ids_probabilities = sorted(list(enumerate(probabilities.tolist())), key=lambda p_id: p_id[1], reverse=True)
         print(ids_probabilities[140])
         filtered_probabilities = [i_p for i_p in ids_probabilities if i_p[1] >= min_prob]
         return OrderedDict({self.tokenizer.decode([id]): probability for id, probability in filtered_probabilities})

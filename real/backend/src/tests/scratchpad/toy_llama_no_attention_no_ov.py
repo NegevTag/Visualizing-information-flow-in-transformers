@@ -9,7 +9,7 @@ Usage:
     model = ToyLlama.build(num_hidden_layers=4)    # override anything
 """
 
-from toy_llama import ToyLlama
+from  tests.scratchpad.toy_llama import ToyLlama
 import torch
 from transformers import LlamaConfig, LlamaForCausalLM, AutoTokenizer
 import nnsight

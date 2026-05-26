@@ -12,7 +12,7 @@ Run:
 
 from info_flow.ex1_math_warmap_cac_normal_res import calc_contribution_per_layer_per_residual
 
-from toy_llama import ToyLlama
+from tests.scratchpad.toy_llama import ToyLlama
 
 
 if __name__ == "__main__":
