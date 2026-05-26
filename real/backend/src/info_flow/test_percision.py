@@ -57,15 +57,15 @@ def percision_test(result: FullRunResults) -> PrecisionResults:  # (Layer, (max_
 
 
 if __name__ == '__main__':
-    calc_percision()
-    # config = Config()
-    # calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
-    # information = FullRunResults.load("f32_and_mat_logits_no_trailing_space")
-    # tokens = calculator.calc_tokens(BENCHMARK_PROMPT)
-    # print(tokens)
-    # index = -1
-    # print(tokens[index])
-    # print(calculator.tokens_probabilities_from_logits(information.logits[-1]))
+    # calc_percision()
+    config = Config()
+    calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
+    information = FullRunResults.load("f32_and_mat_logits_no_trailing_space")
+    tokens = calculator.calc_tokens(BENCHMARK_PROMPT)
+    print(tokens)
+    index = -1
+    print(tokens[index])
+    print(calculator.tokens_probabilities_from_logits(information.logits[-1]))
     
     # old_method = percision_test(FullRunResults.load('f32_calc'))
     # new_method = percision_test(FullRunResults.load('f32_and_mat'))

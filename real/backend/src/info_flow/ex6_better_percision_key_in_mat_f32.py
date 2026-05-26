@@ -217,7 +217,6 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
         post_last_rms = calc_post_rms_last(post_mlp_contribution[l + 1]).sum(dim=-2)  # (position,d_model)
         W_lm = model.lm_head.weight  # (vocab_size,d_model)
         logits = (W_lm @ post_last_rms.to(torch.bfloat16).T).save()  # (vocab_size,p_len)
-        logits = logits.T  # (p_len,vocab_size)
         print(f"logits shape{logits.shape}")
 
     return (post_mlp_contribution[1:], post_attention_contribution), logits, (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
