@@ -53,7 +53,7 @@ def case_G_via_function(model):
 
 
 if __name__ == "__main__":
-    model = ToyLlama.build()
+    model = ToyLlama.build_nnsight_mode()
     print("=" * 60)
     case_E_append_real_tensor(model)
     print("-" * 60)

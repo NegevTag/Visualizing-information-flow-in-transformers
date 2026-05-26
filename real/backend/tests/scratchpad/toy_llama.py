@@ -11,6 +11,9 @@ Usage:
 
 from transformers import LlamaConfig, LlamaForCausalLM, AutoTokenizer
 import nnsight
+import torch
+
+LlamaDType = torch.bfloat16
 
 
 class ToyLlama:
@@ -31,12 +34,21 @@ class ToyLlama:
     TOKENIZER_NAME = "hf-internal-testing/llama-tokenizer"
 
     @classmethod
-    def build(cls, **config_overrides) -> nnsight.LanguageModel:
-        """Build a tiny Llama, wrap in nnsight. Pass kwargs to override DEFAULT_CONFIG."""
+    def build_tokenizer(cls):
         tok = AutoTokenizer.from_pretrained(cls.TOKENIZER_NAME)
         tok.pad_token = tok.eos_token
+        return tok
+
+    @classmethod
+    def build_hf_model(cls, config_overrides, tokenizer):
         # vocab_size must match the tokenizer so token IDs index valid embedding rows.
-        cfg_kwargs = {**cls.DEFAULT_CONFIG, **config_overrides, "vocab_size": tok.vocab_size}
+        cfg_kwargs = {**cls.DEFAULT_CONFIG, **config_overrides, "vocab_size": tokenizer.vocab_size}
         config = LlamaConfig(**cfg_kwargs)
-        hf_model = LlamaForCausalLM(config)
-        return nnsight.LanguageModel(hf_model, tokenizer=tok)
+        return LlamaForCausalLM(config).to(LlamaDType)
+
+    @classmethod
+    def build_nnsight_mode(cls, **config_overrides) -> nnsight.LanguageModel:
+        """Build a tiny Llama, wrap in nnsight. Pass kwargs to override DEFAULT_CONFIG."""
+        tokenizer = cls.build_tokenizer()
+        hf_model = cls.build_hf_model(config_overrides, tokenizer)
+        return nnsight.LanguageModel(hf_model, tokenizer=tokenizer)

@@ -65,7 +65,7 @@ def case_D_list_append_proxy(model):
 
 
 if __name__ == "__main__":
-    model = ToyLlama.build()
+    model = ToyLlama.build_nnsight_mode()
     print("=" * 60)
     case_A_plain_scalar(model)
     print("-" * 60)

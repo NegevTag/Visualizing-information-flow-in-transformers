@@ -174,7 +174,7 @@ CHECKS: list[tuple[str, Check]] = [
 
 def main() -> None:
     torch.manual_seed(0)
-    model = ToyLlama.build()
+    model = ToyLlama.build_nnsight_mode()
     d_model = model.model.config.hidden_size
 
     section("setup")
