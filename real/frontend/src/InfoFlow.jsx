@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 
-// MVP: prompt -> GET /api?prompt=... -> render attention + MLP norm bars.
+// MVP: prompt -> GET http://127.0.0.1:8000/?prompt=... -> render attention + MLP norm bars.
+// Backend has CORS enabled, so we hit it directly (no vite proxy).
 // Backend returns:
 //   { attention_norms: [layer][position][source],
 //     mlp_norms:        [layer][position][source],
@@ -73,6 +74,12 @@ export default function InfoFlow() {
   // First token hidden by default (BOS / leading token tends to dominate).
   const [hidden, setHidden] = useState(() => new Set([0]));
 
+  // ===== TOY MODEL TOGGLE (testing only — delete this block + the checkboxes
+  // + the modelMode branch in run() to remove) =====
+  // "real" -> /, "toy_model" -> /toy_model, "toy_unit" -> /toy_unit
+  const [modelMode, setModelMode] = useState("real");
+  // ===== END TOY MODEL TOGGLE =====
+
   function toggleHidden(i) {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -91,7 +98,9 @@ export default function InfoFlow() {
     setError(null);
     setSelected(null);
     try {
-      const res = await fetch(`/api?prompt=${encodeURIComponent(prompt)}`);
+      // TOY MODEL TOGGLE (delete the `path` lookup to remove)
+      const path = { real: "/", toy_model: "/toy_model", toy_unit: "/toy_unit" }[modelMode];
+      const res = await fetch(`http://127.0.0.1:8000${path}?prompt=${encodeURIComponent(prompt)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
@@ -187,6 +196,37 @@ export default function InfoFlow() {
         >
           {loading ? "running…" : "run"}
         </button>
+        {/* ===== TOY MODEL TOGGLE (testing only — delete this block to remove) =====
+            Mutually-exclusive tickboxes: checking one selects that endpoint;
+            unchecking falls back to the real model. */}
+        {[
+          { mode: "toy_model", label: "toy", title: "hit /toy_model instead of /" },
+          { mode: "toy_unit", label: "toy_unit", title: "hit /toy_unit instead of /" },
+        ].map(({ mode, label, title }) => (
+          <label
+            key={mode}
+            title={title}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontFamily: MONO,
+              fontSize: 10,
+              color: "#888",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={modelMode === mode}
+              onChange={(e) => setModelMode(e.target.checked ? mode : "real")}
+              style={{ accentColor: "#333", width: 12, height: 12, cursor: "pointer" }}
+            />
+            {label}
+          </label>
+        ))}
+        {/* ===== END TOY MODEL TOGGLE ===== */}
       </div>
 
       {error && (

@@ -1,9 +1,19 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from info_flow.config import Config
 from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32
 from pydantic import BaseModel
 import uvicorn
 app = FastAPI()
+
+# Allow the vite dev server (a different origin) to read responses.
+# Without this the browser blocks the JSON even though the request returns 200.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class ReturnInfo(BaseModel):
     attention_norms:list[list[list[float]]] #(layer,position,source)
