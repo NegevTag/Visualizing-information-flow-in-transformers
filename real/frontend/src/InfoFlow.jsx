@@ -10,9 +10,11 @@ import { useState, useMemo } from "react";
 const MONO = "'JetBrains Mono','Fira Mono','Consolas',monospace";
 
 // HSL palette so it scales to any prompt length. Muted, Tufte-ish.
-function colorFor(i, n) {
+// MLP gets a washed-out variant so the eye separates attention (primary
+// information mixing) from MLP (secondary, per-position transform).
+function colorFor(i, n, isMLP = false) {
   const h = (i * 360) / Math.max(n, 1);
-  return `hsl(${h}, 50%, 50%)`;
+  return isMLP ? `hsl(${h}, 30%, 72%)` : `hsl(${h}, 50%, 50%)`;
 }
 
 function normalizeRow(row) {
@@ -30,14 +32,26 @@ function applyHidden(row, hidden) {
 }
 
 function Bar({ row, height, selected, n, isMLP }) {
+  // MLP rows: same hue family as the source token but desaturated + lighter,
+  // plus a thin dashed top border, so they read as a secondary information
+  // band rather than another attention row.
+  const bg = isMLP ? "#fafafa" : "#f0f0f0";
   return (
-    <div style={{ height, display: "flex", overflow: "hidden", background: "#f0f0f0" }}>
+    <div
+      style={{
+        height,
+        display: "flex",
+        overflow: "hidden",
+        background: bg,
+        borderTop: isMLP ? "1px dashed #ddd" : "none",
+      }}
+    >
       {selected !== null ? (
         <>
           <div
             style={{
               width: `${(row[selected] ?? 0) * 100}%`,
-              background: colorFor(selected, n),
+              background: colorFor(selected, n, isMLP),
               transition: "width .3s",
             }}
           />
@@ -53,9 +67,8 @@ function Bar({ row, height, selected, n, isMLP }) {
               key={ti}
               style={{
                 width: `${v * 100}%`,
-                background: colorFor(ti, n),
+                background: colorFor(ti, n, isMLP),
                 transition: "width .3s",
-                opacity: isMLP ? 0.7 : 1,
               }}
             />
           ))
@@ -80,6 +93,11 @@ export default function InfoFlow() {
   const [modelMode, setModelMode] = useState("real");
   // ===== END TOY MODEL TOGGLE =====
 
+  // Visual swap: when true, attention rows get the thin/washed treatment and
+  // MLP rows get the thick/saturated one. Row positions and label text stay
+  // put — only height/font-size/color-saturation flip.
+  const [swap, setSwap] = useState(false);
+
   function toggleHidden(i) {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -99,7 +117,12 @@ export default function InfoFlow() {
     setSelected(null);
     try {
       // TOY MODEL TOGGLE (delete the `path` lookup to remove)
-      const path = { real: "/", toy_model: "/toy_model", toy_unit: "/toy_unit" }[modelMode];
+      const path = {
+        real: "/",
+        toy_model: "/toy_model",
+        toy_unit: "/toy_unit",
+        toy_one_move: "/toy_one_move",
+      }[modelMode];
       const res = await fetch(`http://127.0.0.1:8000${path}?prompt=${encodeURIComponent(prompt)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -202,6 +225,7 @@ export default function InfoFlow() {
         {[
           { mode: "toy_model", label: "toy", title: "hit /toy_model instead of /" },
           { mode: "toy_unit", label: "toy_unit", title: "hit /toy_unit instead of /" },
+          { mode: "toy_one_move", label: "toy_one_move", title: "hit /toy_one_move instead of /" },
         ].map(({ mode, label, title }) => (
           <label
             key={mode}
@@ -227,6 +251,51 @@ export default function InfoFlow() {
           </label>
         ))}
         {/* ===== END TOY MODEL TOGGLE ===== */}
+
+        {/* vertical attn/mlp style swap. Top half = "attn primary" (default),
+            bottom half = "mlp primary". Click anywhere to toggle. */}
+        <div
+          onClick={() => setSwap((s) => !s)}
+          title="swap attention/MLP visual styles"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            cursor: "pointer",
+            userSelect: "none",
+            fontFamily: MONO,
+            fontSize: 8,
+            color: "#888",
+            lineHeight: 1,
+            marginLeft: 4,
+          }}
+        >
+          <div style={{ marginBottom: 2, fontWeight: !swap ? 700 : 400, color: !swap ? "#333" : "#bbb" }}>A</div>
+          <div
+            style={{
+              width: 16,
+              height: 30,
+              borderRadius: 8,
+              background: "#eee",
+              border: "1px solid #ccc",
+              position: "relative",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: 2,
+                top: swap ? 16 : 2,
+                width: 10,
+                height: 10,
+                borderRadius: 5,
+                background: "#333",
+                transition: "top .18s ease",
+              }}
+            />
+          </div>
+          <div style={{ marginTop: 2, fontWeight: swap ? 700 : 400, color: swap ? "#333" : "#bbb" }}>M</div>
+        </div>
       </div>
 
       {error && (
@@ -307,7 +376,11 @@ export default function InfoFlow() {
           <div style={{ overflowX: "auto" }}>
             {rows.map((row, ri) => {
               const isMLP = row.type === "mlp";
-              const rh = isMLP ? MH : AH;
+              // styleAsMLP drives the visual treatment (height, text size,
+              // color saturation). Position and label text stay tied to the
+              // actual row type — only design flips.
+              const styleAsMLP = swap ? !isMLP : isMLP;
+              const rh = styleAsMLP ? MH : AH;
               return (
                 <div
                   key={ri}
@@ -320,50 +393,78 @@ export default function InfoFlow() {
                       textAlign: "right",
                       paddingRight: 8,
                       fontFamily: MONO,
-                      fontSize: isMLP ? 8 : 10,
-                      color: isMLP ? "#bbb" : "#999",
+                      fontSize: styleAsMLP ? 8 : 10,
+                      color: styleAsMLP ? "#bbb" : "#999",
                     }}
                   >
                     {isMLP ? `mlp${row.layer}` : `L${row.layer}`}
                   </div>
                   {row.dist.map((posRow, pos) => (
                     <div key={pos} style={{ width: CW, padding: "0 2px" }}>
-                      <Bar row={posRow} height={rh} selected={selected} n={N} isMLP={isMLP} />
+                      <Bar row={posRow} height={rh} selected={selected} n={N} isMLP={styleAsMLP} />
                     </div>
                   ))}
                 </div>
               );
             })}
 
+            {/* color stripe above bottom token labels — same width as the
+                token's column, in the token's hue. Visually ties the legend
+                color to the column it sits over.
+                Uses a real spacer div (not marginLeft) so it lines up with the
+                bars: row labels are content-box, so LW + paddingRight pushes
+                bars 8px past LW — a margin of just LW would be misaligned. */}
+            <div style={{ display: "flex", marginTop: 4, alignItems: "center" }}>
+              <div style={{ width: LW, flexShrink: 0, paddingRight: 8 }} />
+              {tokens.map((_, i) => {
+                const isHidden = hidden.has(i);
+                const dim = selected !== null && selected !== i;
+                return (
+                  <div key={i} style={{ width: CW, padding: "0 2px" }}>
+                    <div
+                      style={{
+                        height: 2,
+                        background: isHidden || dim ? "#eee" : colorFor(i, N),
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
             {/* token axis labels at bottom */}
-            <div style={{ display: "flex", marginLeft: LW, marginTop: 6 }}>
+            <div style={{ display: "flex", marginTop: 4, alignItems: "center" }}>
+              <div style={{ width: LW, flexShrink: 0, paddingRight: 8 }} />
               {tokens.map((tok, i) => {
                 const isHidden = hidden.has(i);
                 return (
-                  <button
-                    key={i}
-                    onClick={() => !isHidden && setSelected(selected === i ? null : i)}
-                    disabled={isHidden}
-                    style={{
-                      width: CW,
-                      fontFamily: MONO,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: isHidden
-                        ? "#ccc"
-                        : selected !== null && selected !== i
-                        ? "#ccc"
-                        : colorFor(i, N),
-                      textDecoration: isHidden ? "line-through" : "none",
-                      background: "none",
-                      border: "none",
-                      cursor: isHidden ? "default" : "pointer",
-                      textAlign: "center",
-                      padding: "2px 0",
-                    }}
-                  >
-                    {tok}
-                  </button>
+                  // Wrapper matches the bar cell (width: CW, padding: 0 2px)
+                  // so labels line up exactly with the columns above.
+                  <div key={i} style={{ width: CW, padding: "0 2px" }}>
+                    <button
+                      onClick={() => !isHidden && setSelected(selected === i ? null : i)}
+                      disabled={isHidden}
+                      style={{
+                        width: "100%",
+                        fontFamily: MONO,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: isHidden
+                          ? "#ccc"
+                          : selected !== null && selected !== i
+                          ? "#ccc"
+                          : colorFor(i, N),
+                        textDecoration: isHidden ? "line-through" : "none",
+                        background: "none",
+                        border: "none",
+                        cursor: isHidden ? "default" : "pointer",
+                        textAlign: "center",
+                        padding: "2px 0",
+                      }}
+                    >
+                      {tok}
+                    </button>
+                  </div>
                 );
               })}
             </div>

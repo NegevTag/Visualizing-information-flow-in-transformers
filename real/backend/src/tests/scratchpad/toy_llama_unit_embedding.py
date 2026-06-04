@@ -33,16 +33,6 @@ import einops as ein
 LlamaDType = torch.bfloat16
 
 
-class NoRope(torch.nn.Module):
-    # recieve x, returns rotationsl cos and sin that will be multiplied late, cold ones
-    def __init__(self, d_q):
-        super().__init__()
-        self.d_q = d_q
-
-    def forward(self, x, position_ids):  # qs : [B,prompt_len,d_q] position_ids [B,prompt_len]
-        return (torch.ones([x.shape[0], x.shape[1], self.d_q], dtype=LlamaDType),
-                torch.zeros([x.shape[0], x.shape[1], self.d_q], dtype=LlamaDType))
-
 
 class EmbedUnitVecs(torch.nn.Module):
     def __init__(self, d_model):
@@ -55,7 +45,7 @@ class EmbedUnitVecs(torch.nn.Module):
 
 
 # Toy llama move delete
-class ToyLlamaNoAttentionNoOvUnitEmbeding(ToyLlama):
+class ToyLllamaUnitEmbedding(ToyLlama):
     DEFAULT_CONFIG = dict(
         hidden_size=32,
         intermediate_size=64,
@@ -72,13 +62,5 @@ class ToyLlamaNoAttentionNoOvUnitEmbeding(ToyLlama):
     def build_hf_model(cls, config_overrides, tokenizer):
         hf_model = super().build_hf_model(config_overrides, tokenizer)
         with torch.no_grad():
-            hf_model.model.rotary_emb = NoRope(hf_model.config.head_dim)
-            hf_model.model.embed_tokens = EmbedUnitVecs(cls.DEFAULT_CONFIG["hidden_size"])
-            for layer in hf_model.model.layers:
-                layer.self_attn.v_proj.weight.zero_()
-                layer.self_attn.o_proj.weight.zero_()
-                layer.mlp.gate_proj.weight.zero_()
-                layer.mlp.up_proj.weight.zero_()
-                layer.mlp.down_proj.weight.zero_()
-
+            hf_model.model.embed_tokens = EmbedUnitVecs(hf_model.config.hidden_size)
         return hf_model
