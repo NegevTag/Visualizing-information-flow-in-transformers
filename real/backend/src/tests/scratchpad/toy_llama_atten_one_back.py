@@ -76,8 +76,12 @@ D_MODEL = 32
 INV_1_SILU = 1.2784645428  # SiLU^-1(1)
 
 
-# Toy llama move delete
 class ToyLllamaAttenOneBack(ToyLllamaUnitEmbedding):
+    """
+    Should in attention attend to one back adn add it, and in mlp to reset attention contributions
+    So attention visual should b1 1/2 me 1/2 previosu
+    And mlp visual should be full me
+    """
     DEFAULT_CONFIG = dict(
         hidden_size=D_MODEL,
         head_dim=D_MODEL,

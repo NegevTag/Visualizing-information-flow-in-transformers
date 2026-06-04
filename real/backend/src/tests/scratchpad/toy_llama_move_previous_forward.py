@@ -46,10 +46,10 @@ def get_key_identity_matrix(d_model: int, h_k: int):  # second matrix is identit
     )
 
 
-def get_v_matrix_to_last_dim(d_model: int, h_k: int):  # second matrix is having effect
+def get_v_matrix_to_previos_dim(d_model: int, h_k: int):  # second matrix is having effect
     to_last_dim = torch.zeros([d_model, d_model], dtype=LlamaDType)
-    for i in range(d_model):
-        to_last_dim[d_model - 1][i] = 1/(i+1)
+    for i in range(2,d_model):
+        to_last_dim[i][i-1] = 1
     return torch.cat(
         [
             torch.zeros([d_model, d_model], dtype=LlamaDType),
@@ -77,12 +77,14 @@ INV_1_SILU = 1.2784645428  # SiLU^-1(1)
 
 
 # Toy llama move delete
-class ToyLllamaAttenOne_Over_N_Back(ToyLllamaUnitEmbedding):
+class ToyLllamaPreviousForward(ToyLllamaUnitEmbedding):
     """
-    Should in attention attend to one back adn add 1/n position, and in mlp to reset attention contributions
-    So attention visual should b1 n-1/n me 1/n previosu
-    And mlp visual should be full me
+    Should also attend one back and add it as current and mlp does nothing
+    firs token dosent add anything to himself
+    should see pattern for example, first index should be 1,0->1/2,1/2 ->2/3,1/3 ->3/4,1/4 etc
+    <start of input> should not move
     """
+    
     DEFAULT_CONFIG = dict(
         hidden_size=D_MODEL,
         head_dim=D_MODEL,
@@ -112,15 +114,13 @@ class ToyLllamaAttenOne_Over_N_Back(ToyLllamaUnitEmbedding):
                 # layer.self_attn.k_proj.weight.copy_(ein.repeat(torch.eye(config.hidden_size, dtype=LlamaDType), "d_model_a d_model_b -> (h_k d_model_a) d_model_b", h_k=config.num_key_value_heads))
                 # layer.self_attn.q_proj.weight.copy_(ein.repeat(torch.eye(config.hidden_size, dtype=LlamaDType), "d_model_a d_model_b -> (h_q d_model_a) d_model_b", h_q=config.num_attention_heads))
 
-                layer.self_attn.v_proj.weight.copy_(get_v_matrix_to_last_dim(config.hidden_size, config.num_key_value_heads))
+                layer.self_attn.v_proj.weight.copy_(get_v_matrix_to_previos_dim(config.hidden_size, config.num_key_value_heads))
                 layer.self_attn.o_proj.weight.copy_(get_o_matrix_zero_with_identity_at_index(config.hidden_size, config.num_attention_heads))
 
                 # # mlp
-                layer.post_attention_layernorm = nn.Identity()
-                layer.mlp.act_fn.forward = lambda self,x: torch.ones_like(x)
-                layer.mlp.gate_proj.weight.copy_(torch.eye(config.hidden_size, dtype=LlamaDType))
-                layer.mlp.up_proj.weight.copy_(torch.eye(config.hidden_size, dtype=LlamaDType))
-                layer.mlp.down_proj.weight.copy_(get_down_project_last_dim_minus(config.hidden_size))
+                layer.mlp.gate_proj.weight.zero_()
+                layer.mlp.up_proj.weight.zero_()
+                layer.mlp.down_proj.weight.zero_()
 
                 # layer.self_attn.v_proj.weight.zero_()
                 # layer.self_attn.o_proj.weight.zero_()
