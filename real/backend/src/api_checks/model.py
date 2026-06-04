@@ -173,45 +173,19 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             layer = model.model.layers[l]
             W_V = layer.self_attn.v_proj.weight.float()  # (Hkv*d_v,d_model)
             W_O = layer.self_attn.o_proj.weight.float()  # (d, H_q* d_v)
-            if not isinstance(layer.input_layernorm._module,nn.Identity):
-                print(type(layer.input_layernorm))
-                post_rmssnorm1_contribution = caclulate_post_rmsnorm1_contribution(layer, post_mlp_contribution[l])  # (position,source,d_model)
-            else:
-                post_rmssnorm1_contribution = post_mlp_contribution[l]
+            post_rmssnorm1_contribution = caclulate_post_rmsnorm1_contribution(layer, post_mlp_contribution[l])  # (position,source,d_model)
 
-            # _real_post_rms1 = layer.input_layernorm.output[0]
-            # # assert allclose(post_rmssnorm1_contribution.sum(dim=1), _real_post_rms1)
-            # del _real_post_rms1
-
-            print("RMS_NORM1 ok")
-            print(f"post Rms1 shape {post_rmssnorm1_contribution.shape}")
             attention_ouput_per_source = torch.zeros((PROMPT_LEN, PROMPT_LEN, D_MODEL), device=device, dtype=dtype).save()  # (position(query),source,d_model)
-            # if l == 0:
-            #     post_rms_res = layer.input_layernorm.output[0] # (prompt_len,d_model)
-            #     print(f"post rms {post_rms_res}")
-            #     key_inner =  post_rms_res @ layer.self_attn.k_proj.weight.T # (prompt_len,H_k * d_kv) = (prompt_len,d_model) x (d_model, H_k*d_kv)
-            #     key_repeated = ein.repeat(key_inner,"p_len (H_k d_kv) -> p_len (H_k r) d_kv",d_kv = D_V, r=heads_ratio) # (p_len, H_q, d_kv)
-            #     query = post_rms_res @ layer.self_attn.q_proj.weight.T # (prompt_len,H_q * d_kv) = (prompt_len,d_model) x (d_model, H_q*d_kv)
-            #     query_repeated = ein.repeat(query, "p_len (H_q d_kv) -> p_len H_q d_kv",d_kv = D_V) # (prompt_len, H_q, d_kv)
-            #     attention_pattern_pre_mask_pre_softmax = ein.einsum(query_repeated, key_repeated,"q_plen Hq dkv, k_plen Hq dkv -> Hq q_plen k_plen")
-            #     print("Pre softmax attention")
-            #     print(attention_pattern_pre_mask_pre_softmax)
-            #     attn_pattern = layer.self_attn.output[1][0].float()  # (H_q,prompt_len(query),prompt_len(key)) post softmax
-            #     print("Post mask softmax attention")
-            #     print(attn_pattern)
             attn_pattern = layer.self_attn.output[1][0].float()  # (H_q,prompt_len(query),prompt_len(key)) post softmax
             for q_residual in range(PROMPT_LEN):
                 per_head_key_v = post_rmssnorm1_contribution @ W_V.T  # (key,prompt_len (source),H_kv * d_v) =  (key,prompt_len(source),d_model) x (d_model,Hkv*dv)
                 reshped_to_per_query_v = ein.repeat(per_head_key_v, "key pl (H_kv d_v)-> d_v (H_kv r) key pl", d_v=D_V, r=heads_ratio)  # (d_v,H_q,p_len(key),p_len(source))
 
                 post_attention_per_query_v = reshped_to_per_query_v * attn_pattern[:, q_residual, :].unsqueeze(-1)  # (d_v,H_q,p_len(key),p_len(source)= (keyd_v, H_q , prompt_len(key),P_len(source))* (H_q ,p_len(key), 1)
-                # print(f"post_attention_per_query_v {post_attention_per_query_v.shape}")
                 post_attention_per_query_v = post_attention_per_query_v.sum(dim=-2)  # (d_v,H_q,p_len(source))
-                # print(f"shape after sum {post_attention_per_query_v.shape}")
                 flatten_post_attention_per_query_v = ein.rearrange(post_attention_per_query_v, "d_v H_q pl -> (H_q d_v) pl")  # (H_q * d_v, p_len(source))
                 attention_ouput_per_source[q_residual] = (W_O @ flatten_post_attention_per_query_v).T  # (p_len(source),d) = ((d, H_q* d_v) x (H_q * d_v, p_len(source)))^T
 
-            # print(f"addition shape{(attention_ouput_per_source + post_mlp_contribution[l]).shape}")
             post_attention_contribution[l] = attention_ouput_per_source + post_mlp_contribution[l]  # (layer,position,source,d_model)
             if not isinstance(layer.input_layernorm._module,nn.Identity):
                 post_rms_norm2_contribution = calc_post_rmsnorm2(layer, post_attention_contribution[l])  # (position,source,d_model)
@@ -224,23 +198,10 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             # print("Rmsnorm2 ok")
             W_up = layer.mlp.up_proj.weight.float()
             upscale_contribution = post_rms_norm2_contribution @ W_up.T  # (position,source,d_mlp) = (position,source,d_model) x (d_model,d_mlp)
-            if l==0:
-                print("updacale contriubtuions")
-                print(upscale_contribution)
             g_l = ein.rearrange(layer.mlp.act_fn.output[0], "p_len d_mlp -> p_len 1 d_mlp").float()  # (prompt_len,1,d_mlp)
-            if l==0:
-                print("gl")
-                print(layer.mlp.act_fn.output[0])
             upscale_g_contribution = g_l * upscale_contribution  # (position,source,d_mlp)
-
-            if l == 0:
-                print(f"Upscale g contribution: {upscale_g_contribution}")
-            # assert allclose(layer.mlp.down_proj.input[0], upscale_g_contribution.sum(dim=1)), f"{layer.mlp.down_proj.input[0].shape} ,{upscale_g_contribution.sum(dim=1).shape}"
             W_down = layer.mlp.down_proj.weight.float()  # (d_model,d_mlp)
             mlp_contribution = upscale_g_contribution @ W_down.T  # (position,source,d_model) = (position,source,d_mlp) x (d_mlp,d_model)
-            if l == 0:
-                print("mmlp contributions")
-                print(mlp_contribution)
             post_mlp_contribution[l + 1] = mlp_contribution + post_attention_contribution[l]  # (layer,position,source,d_model)
 
 
@@ -256,7 +217,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
     return (post_mlp_contribution[1:], post_attention_contribution), logits, (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
-class ModelInformationCalculatorF32Ex6:
+class ModelInformationCalculatorF32:
     def __init__(self, model_name: str, hf_token: str, remote: bool | str = True) -> None:
         self.model = _get_model(model_name, hf_token)
         self.tokenizer = self.model.tokenizer
