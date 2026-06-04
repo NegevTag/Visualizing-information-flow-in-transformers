@@ -122,6 +122,7 @@ export default function InfoFlow() {
         toy_model: "/toy_model",
         toy_unit: "/toy_unit",
         toy_one_move: "/toy_one_move",
+        toy_one_over_n_move: "/toy_one_over_n_move",
       }[modelMode];
       const res = await fetch(`http://127.0.0.1:8000${path}?prompt=${encodeURIComponent(prompt)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -226,6 +227,7 @@ export default function InfoFlow() {
           { mode: "toy_model", label: "toy", title: "hit /toy_model instead of /" },
           { mode: "toy_unit", label: "toy_unit", title: "hit /toy_unit instead of /" },
           { mode: "toy_one_move", label: "toy_one_move", title: "hit /toy_one_move instead of /" },
+          { mode: "toy_one_over_n_move", label: "toy_1/n_move", title: "hit /toy_one_over_n_move instead of /" },
         ].map(({ mode, label, title }) => (
           <label
             key={mode}
