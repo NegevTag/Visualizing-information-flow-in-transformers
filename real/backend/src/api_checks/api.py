@@ -14,6 +14,7 @@ class ReturnInfo(BaseModel):
     attention_norms: list[list[list[float]]]  # (layer,position,source)
     mlp_norms: list[list[list[float]]]  # (layer,position,source)
     tokens: list[str]
+    top_perdictions:dict[str,float]
 
 
 @app.get("/")
@@ -24,7 +25,8 @@ def calc_norms(prompt: str):
     information = calculator.calc(prompt)
     mlp_norms = information.contributions.post_mlp_contribution.norm(dim=-1)
     attention_norms = information.contributions.post_attention_contribution.norm(dim=-1)
-    return ReturnInfo(attention_norms=attention_norms, mlp_norms=mlp_norms, tokens=tokens)
+    top_perdictions = calculator.tokens_probabilities_from_logits(information.logits[-1])
+    return ReturnInfo(attention_norms=attention_norms, mlp_norms=mlp_norms, tokens=tokens,top_perdictions=top_perdictions)
 
 
 if __name__ == "__main__":

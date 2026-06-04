@@ -1,3 +1,4 @@
+from api_checks.model import ModelInformationCalculatorF32
 from info_flow.config import Config
 from info_flow.ex6_better_percision_key_in_mat_f32 import FullRunResults
 from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorRealNorms
@@ -61,11 +62,12 @@ if __name__ == '__main__':
     # calc_percision()
     
     config = Config()
-    calculator = ModelInformationCalculatorF32Ex6(config.info_flow_model, config.hf_token, remote="local")
-    calculator.model = ToyLllamaAttenOneBack.build_nnsight_mode()
-    information = calculator.calc(prompt="the cat sat on the")
+    calculator = ModelInformationCalculatorF32(config.info_flow_model, config.hf_token)
+    information = calculator.calc(prompt="My favorite food is pizza and")
     precision = percision_test(information)
     pretty_print_precision(precision)
+    print(information.logits.shape)
+    print(calculator.tokens_probabilities_from_logits(information.logits[-1]))
 
 
     # config = Config()

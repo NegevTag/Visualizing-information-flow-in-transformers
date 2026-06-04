@@ -211,7 +211,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
         # output
         post_last_rms = calc_post_rms_last(post_mlp_contribution[l + 1]).sum(dim=-2)  # (position,d_model)
         W_lm = model.lm_head.weight  # (vocab_size,d_model)
-        logits = (W_lm @ post_last_rms.to(torch.bfloat16).T).save()  # (vocab_size,p_len)
+        logits = (W_lm @ post_last_rms.to(torch.bfloat16).T).T.save()  # (p_len,vocab_size)
         print(f"logits shape{logits.shape}")
 
     return (post_mlp_contribution[1:], post_attention_contribution), logits, (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
@@ -238,6 +238,5 @@ class ModelInformationCalculatorF32:
     def tokens_probabilities_from_logits(self, single_logits: torch.Tensor, min_prob=0.04) -> dict[str, float]:  # logits: (vocab_size) return dict[token->prob]
         probabilities = torch.softmax(single_logits, dim=-1)
         ids_probabilities = sorted(list(enumerate(probabilities.tolist())), key=lambda p_id: p_id[1], reverse=True)
-        print(ids_probabilities[140])
         filtered_probabilities = [i_p for i_p in ids_probabilities if i_p[1] >= min_prob]
         return OrderedDict({self.tokenizer.decode([id]): probability for id, probability in filtered_probabilities})
