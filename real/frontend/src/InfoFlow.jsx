@@ -79,7 +79,7 @@ function Bar({ row, height, selected, n, isMLP }) {
 
 export default function InfoFlow() {
   const [prompt, setPrompt] = useState("the cat sat");
-  const [data, setData] = useState(null); // {tokens, attention_norms, mlp_norms}
+  const [data, setData] = useState(null); // {tokens, attention_norms, mlp_norms, top_perdictions}
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -325,6 +325,45 @@ export default function InfoFlow() {
               </button>
             )}
           </div>
+
+          {/* Top next-token predictions: legend swatches, same color, stacked
+              vertically above the last token's column (where the next token
+              would appear). Most probable token sits at the top. */}
+          {data.top_perdictions && Object.keys(data.top_perdictions).length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: 10,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                  fontFamily: MONO,
+                  fontSize: 10,
+                  color: "#333",
+                  alignItems: "flex-start",
+                }}
+              >
+                {Object.entries(data.top_perdictions)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([tok, p], i) => (
+                    <div
+                      key={i}
+                      title={p.toFixed(4)}
+                      style={{ display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      <div style={{ width: 8, height: 8, background: "#555" }} />
+                      <span>{tok}</span>
+                      <span style={{ color: "#888" }}>{p.toFixed(3)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
 
           {/* grid */}
           <div style={{ overflowX: "auto" }}>
