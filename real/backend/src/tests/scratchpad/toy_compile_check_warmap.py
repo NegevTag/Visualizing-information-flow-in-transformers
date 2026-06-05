@@ -12,7 +12,7 @@ Run:
 
 from info_flow.ex1_math_warmap_cac_normal_res import calc_contribution_per_layer_per_residual
 
-from toy_llama import ToyLlama
+from tests.scratchpad.toy_llama import ToyLlama
 
 
 if __name__ == "__main__":
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     # temporarily change `remote=True` -> `remote='local'` inside
     # calc_contribution_per_layer_per_residual. Otherwise it'll try to ship
     # to NDIF and you'll see MissedProviderError instead of the real cause.
-    model = ToyLlama.build()
+    model = ToyLlama.build_nnsight_mode()
     prompt = "The cat sat on the"
     result = calc_contribution_per_layer_per_residual(model, prompt,remote = 'local')
     print(f"OK. layers returned: {len(result)}")
