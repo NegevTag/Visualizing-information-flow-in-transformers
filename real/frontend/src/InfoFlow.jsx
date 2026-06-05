@@ -87,12 +87,6 @@ export default function InfoFlow() {
   // First token hidden by default (BOS / leading token tends to dominate).
   const [hidden, setHidden] = useState(() => new Set([0]));
 
-  // ===== TOY MODEL TOGGLE (testing only — delete this block + the checkboxes
-  // + the modelMode branch in run() to remove) =====
-  // "real" -> /, "toy_model" -> /toy_model, "toy_unit" -> /toy_unit
-  const [modelMode, setModelMode] = useState("real");
-  // ===== END TOY MODEL TOGGLE =====
-
   // Visual swap: when true, attention rows get the thin/washed treatment and
   // MLP rows get the thick/saturated one. Row positions and label text stay
   // put — only height/font-size/color-saturation flip.
@@ -116,16 +110,7 @@ export default function InfoFlow() {
     setError(null);
     setSelected(null);
     try {
-      // TOY MODEL TOGGLE (delete the `path` lookup to remove)
-      const path = {
-        real: "/",
-        toy_model: "/toy_model",
-        toy_unit: "/toy_unit",
-        toy_one_move: "/toy_one_move",
-        toy_one_over_n_move: "/toy_one_over_n_move",
-        toy_llama_previous_forward: "/toy_llama_previous_forward",
-      }[modelMode];
-      const res = await fetch(`http://127.0.0.1:8000${path}?prompt=${encodeURIComponent(prompt)}`);
+      const res = await fetch(`http://127.0.0.1:8000/?prompt=${encodeURIComponent(prompt)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
@@ -221,41 +206,6 @@ export default function InfoFlow() {
         >
           {loading ? "running…" : "run"}
         </button>
-        {/* ===== TOY MODEL TOGGLE (testing only — delete this block to remove) =====
-            Mutually-exclusive tickboxes: checking one selects that endpoint;
-            unchecking falls back to the real model. */}
-        {[
-          { mode: "toy_model", label: "toy", title: "hit /toy_model instead of /" },
-          { mode: "toy_unit", label: "toy_unit", title: "hit /toy_unit instead of /" },
-          { mode: "toy_one_move", label: "toy_one_move", title: "hit /toy_one_move instead of /" },
-          { mode: "toy_one_over_n_move", label: "toy_1/n_move", title: "hit /toy_one_over_n_move instead of /" },
-          { mode: "toy_llama_previous_forward", label: "toy_prev_fwd", title: "hit /toy_llama_previous_forward instead of /" },
-        ].map(({ mode, label, title }) => (
-          <label
-            key={mode}
-            title={title}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              fontFamily: MONO,
-              fontSize: 10,
-              color: "#888",
-              cursor: "pointer",
-              userSelect: "none",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={modelMode === mode}
-              onChange={(e) => setModelMode(e.target.checked ? mode : "real")}
-              style={{ accentColor: "#333", width: 12, height: 12, cursor: "pointer" }}
-            />
-            {label}
-          </label>
-        ))}
-        {/* ===== END TOY MODEL TOGGLE ===== */}
-
         {/* vertical attn/mlp style swap. Top half = "attn primary" (default),
             bottom half = "mlp primary". Click anywhere to toggle. */}
         <div

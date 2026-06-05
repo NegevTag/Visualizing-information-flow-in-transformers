@@ -2,7 +2,7 @@ from info_flow.config import Config
 from info_flow.ex6_better_percision_key_in_mat_f32 import FullRunResults
 from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorRealNorms
 from info_flow.ex5_better_percision_key_in_mat_calc import ModelInformationCalculatorNotPerKey
-from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32
+from info_flow.ex6_better_percision_key_in_mat_f32 import ModelInformationCalculatorF32Ex6
 import torch
 from info_flow.precision_visualization import PrecisionResults, compare_percision, pretty_print_precision
 from tests.scratchpad.toy_llama_atten_one_back import ToyLllamaAttenOneBack
@@ -20,7 +20,7 @@ PRECINTILES = (98, 99)
 #f32_and_mat_logits_no_trailing_space
 def calc_percision():
     config = Config()
-    information_calculator = ModelInformationCalculatorF32(model_name=config.info_flow_model, hf_token=config.hf_token)
+    information_calculator = ModelInformationCalculatorF32Ex6(model_name=config.info_flow_model, hf_token=config.hf_token)
     information = information_calculator.calc("The cat sat on the mat but he didnt")
     # information.dump("f32_and_mat_logits_no_trailing_space")
     percision = percision_test(information)
@@ -61,7 +61,7 @@ if __name__ == '__main__':
     # calc_percision()
     
     config = Config()
-    calculator = ModelInformationCalculatorF32(config.info_flow_model, config.hf_token, remote="local")
+    calculator = ModelInformationCalculatorF32Ex6(config.info_flow_model, config.hf_token, remote="local")
     calculator.model = ToyLllamaAttenOneBack.build_nnsight_mode()
     information = calculator.calc(prompt="the cat sat on the")
     precision = percision_test(information)
