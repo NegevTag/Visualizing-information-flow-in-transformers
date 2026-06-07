@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import ZoomPanVanilla from "./ZoomPanVanilla.jsx";
 
 // MVP: prompt -> GET http://127.0.0.1:8000/?prompt=... -> render attention + MLP norm bars.
 // Backend has CORS enabled, so we hit it directly (no vite proxy).
@@ -148,7 +149,9 @@ export default function InfoFlow() {
 
   const tokens = data?.tokens ?? [];
   const N = tokens.length;
-  const CW = N > 0 ? Math.max(40, Math.min(90, Math.floor(600 / N))) : 60;
+  // 1.5× wider than the previous 40–90 range. With zoom + pan available now,
+  // it's fine if not all columns fit on screen at once.
+  const CW = N > 0 ? Math.max(60, Math.min(135, Math.floor(900 / N))) : 90;
   const AH = 11;
   const MH = 4;
   const LW = 48;
@@ -365,8 +368,9 @@ export default function InfoFlow() {
             </div>
           )}
 
-          {/* grid */}
-          <div style={{ overflowX: "auto" }}>
+          {/* grid — wrapped in zoom/pan surface (mouse wheel zooms centered
+              on the cursor, click-drag pans, reset button top-right). */}
+          <ZoomPanVanilla>
             {rows.map((row, ri) => {
               const isMLP = row.type === "mlp";
               // styleAsMLP drives the visual treatment (height, text size,
@@ -461,7 +465,7 @@ export default function InfoFlow() {
                 );
               })}
             </div>
-          </div>
+          </ZoomPanVanilla>
         </>
       )}
     </div>
