@@ -1,32 +1,103 @@
-# Information-flow visualization for a real Llama
+# Information Flow Visualization
 
-This repo is replacing a synthetic React demo of per-token information flow
-through a transformer with a **real-model** version. A Python backend runs
-`meta-llama/Llama-3.2-3B` (via [`nnsight`](https://nnsight.net)), linearizes the
-forward pass with **frozen-QK + frozen-gate + frozen-RMSNorm-scale** so the
-residual stream at every (layer, position) can be decomposed exactly into
-per-source-token contributions, and a React frontend renders the result
-interactively (prompt in → bars out, with a selectable norm and click-to-trace).
+Visualize, per token, how information flows through a real Llama model. For a
+given prompt the backend decomposes the residual stream at every
+layer/position into **per-source-token contributions**, and the frontend
+renders those contributions as stacked bars so you can read which earlier
+tokens fed into each position.
 
-## Layout
+The core trick: by **freezing** the attention pattern (QK circuit) and the MLP
+gate values from a normal forward pass, the residual stream becomes a *linear*
+function of the per-source contributions. That linearity is what lets us
+attribute every position's residual back to the source tokens that produced it.
 
-- `synthetic_demo/` — the original synthetic React demo, kept for reference. Run
-  with `cd synthetic_demo && npm run dev`.
-- `real/` — the real-Llama implementation. Currently only `real/docs/` exists;
-  backend (`real/backend/`) and frontend (`real/frontend/`) land in later phases.
-- `backup/` — legacy `CLAUDE.md`.
-- `CLAUDE.md`, `DECISIONS.md`, `RECORD.md` — project memory (working agreement,
-  locked design decisions, research log).
+---
 
-## Where the math lives
+## Repository layout
 
-- `real/docs/decomposition_math.tex` — canonical formal spec of the
-  linearization (notation, frozen-QK recurrence, frozen-RMSNorm, frozen-gate
-  SwiGLU derivation, full algorithm, correctness criteria C1–C4). Rendered to
-  `real/docs/decomposition_math.pdf`.
-- `real/docs/building_blocks.md` — transformer primer.
+```
+real/
+  backend/                 FastAPI service that computes the decomposition
+    src/api_checks/         the API + decomposition logic (see below)
+    src/info_flow/config.py runtime config (Config, from .env.local)
+    pyproject.toml          deps (uv); also declares info_flow package
+  frontend/                React + Vite UI that calls the backend and draws bars
 
-## Status
+project_scratchpad/        archived research: experiments, tests, notes,
+                           docs, the synthetic demo, and earlier prototypes.
+                           Not needed to run the app.
+```
 
-Phase 0 (repo hygiene) is done. Phase 1 (nnsight probe — confirm the cache
-points we need are exposed at the right granularity) is next.
+### `api_checks` (the backend that matters)
+
+| File | Role |
+|------|------|
+| `api.py` | FastAPI app. `GET /?prompt=...` returns attention/MLP contribution **norms** `(layer, position, source)`, the tokenized prompt, and top next-token predictions. |
+| `model.py` | `ModelInformationCalculatorF32` + `calc_contribution_per_layer_per_residual`. Runs the model via **nnsight** (remote on NDIF by default), captures the frozen attention pattern and MLP gate, and reconstructs each layer's residual as a sum over source tokens. RMSNorm is folded in analytically. All math is done in `float32`. |
+| `api_cache.py` | `APICache` — memoizes full runs to `.pt` files keyed by `(model_name, prompt)`, so repeated prompts skip recomputation. |
+| `full_run_result.py` | Pydantic containers: `FullRunResults`, `Contributions` (post-attention / post-MLP, shape `(layer, position, source, d_model)`), `ResidualStream` (the true residuals, for precision checks), `ResultsDimentions`. |
+| `utils.py` | `get_model` (loads an nnsight `LanguageModel`) and cache-file timestamp helper. |
+
+### `frontend`
+
+`src/InfoFlow.jsx` fetches the backend JSON and draws, for each layer/position,
+a stacked bar where each segment is a source token's normalized contribution
+norm. Attention and MLP bands are colored distinctly (Tufte-ish muted palette).
+`ZoomPanVanilla.jsx` adds zoom/pan over the grid.
+
+---
+
+## Running
+
+### Backend
+
+Requires a `real/backend/.env.local` providing the `Config` fields:
+`hf_token`, `ndif_api_key`, `info_flow_model`, `result_cache_path`,
+`default_atol`, `default_rtol`.
+
+```bash
+cd real/backend
+uv sync
+uv run uvicorn api_checks.api:app --reload   # serves on http://127.0.0.1:8000
+# or: uv run python -m api_checks.api
+```
+
+`GET http://127.0.0.1:8000/?prompt=The capital of France is` returns:
+
+```json
+{
+  "attention_norms": [[[...]]],   // (layer, position, source)
+  "mlp_norms":       [[[...]]],   // (layer, position, source)
+  "tokens":          ["The", " capital", ...],
+  "top_perdictions": {" Paris": 0.81, ...}
+}
+```
+
+### Frontend
+
+```bash
+cd real/frontend
+npm install
+npm run dev          # Vite dev server; hits the backend directly (CORS is open)
+```
+
+---
+
+## How the decomposition works (sketch)
+
+For a prompt of length $P$ we track a contribution tensor of shape
+$(\text{layer}, \text{position}, \text{source}, d_{\text{model}})$, initialized so
+position $p$'s only contribution is its own embedding. Then per layer:
+
+1. **Attention** — apply RMSNorm (`input_layernorm`) to the contributions, push
+   them through $W_V$, weight each source by the **frozen** attention pattern
+   $\text{softmax}(QK^\top)$, and project with $W_O$. Because the pattern is held
+   fixed, this is linear in the source contributions.
+2. **MLP** — apply RMSNorm (`post_attention_layernorm`), up-project, multiply by
+   the **frozen** gate activations $g$, then down-project. Again linear given $g$.
+3. Accumulate into the next layer's contribution tensor.
+
+A final RMSNorm + LM head gives logits. The true residual stream is also captured
+(`ResidualStream`) so the reconstruction can be checked against the real forward
+pass. The API exposes the per-source **L2 norms** of these contributions, which is
+what the UI visualizes.
