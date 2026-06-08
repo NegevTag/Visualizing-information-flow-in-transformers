@@ -1,6 +1,7 @@
 from enum import Enum
 import math
 from typing import OrderedDict
+from warnings import deprecated
 
 import nnsight
 from pathlib import Path
@@ -58,7 +59,7 @@ class FullRunResults(BaseModel):
     dimentions: ResultsDimentions
 
     model_config = SettingsConfigDict(arbitrary_types_allowed=True)
-
+    @deprecated("Use Only for quick tests")
     def dump(self, key: str) -> Path:
         # serialize tensors + scalars to a single .pt file keyed by `key`
         LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,8 +76,8 @@ class FullRunResults(BaseModel):
         }
         torch.save(payload, path)
         return path
-
     @classmethod
+    @deprecated("Use only for quick tests")
     def load(cls, key: str) -> "FullRunResults":
         path = LOCAL_STORAGE_DIR / f"{key}.pt"
         payload = torch.load(path, weights_only=False)
