@@ -14,13 +14,10 @@ import torch.nn as nn
 import sys
 import os
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pydantic import BaseModel
 import torch  # noqa: E402
 import einops as ein
-
-HF_TOKEN: str | None = os.environ.get("HF_TOKEN")
 
 
 def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, prompt: str, remote: bool | str = True):  # ->(layer,position,source,d_model), (layer,position,source,d_model)
@@ -118,20 +115,14 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
     return (post_mlp_contribution[1:], post_attention_contribution), logits, (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
-def _get_model(model_name: str, hf_token: str) -> nnsight.LanguageModel:
-    model_kwargs_dict = {"token": hf_token}
-    return nnsight.LanguageModel(model_name, **model_kwargs_dict)  # type: ignore[arg-type]
-
-
 class ModelInformationCalculatorF32:
-    def __init__(self, model_name: str, hf_token: str, remote: bool | str = True) -> None:
-        self.model = _get_model(model_name, hf_token)
+    def __init__(self, model: nnsight.LanguageModel) -> None:
+        self.model = model
         self.tokenizer = self.model.tokenizer
         self.tokenizer.clean_up_tokenization_spaces = False
-        self.remote = remote
 
-    def calc(self, prompt: str) -> FullRunResults:
-        (post_mlp_contribution, post_attention_contribution), logits, (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt, remote=self.remote)
+    def calc(self, prompt: str, remote: bool | str = True) -> FullRunResults:
+        (post_mlp_contribution, post_attention_contribution), logits, (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt, remote=remote)
         contributiutions = Contributions(post_mlp_contribution=post_mlp_contribution, post_attention_contribution=post_attention_contribution)
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
         info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
