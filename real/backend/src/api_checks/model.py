@@ -131,6 +131,7 @@ class ModelInformationCalculatorF32:
     def calc_tokens(self, prompt: str) -> list[str]:
         tokens_ids = self.tokenizer(prompt)["input_ids"]
         return [self.tokenizer.decode([id]) for id in tokens_ids]
+    
 
     def tokens_probabilities_from_logits(self, single_logits: torch.Tensor, min_prob=0.04) -> dict[str, float]:  # logits: (vocab_size) return dict[token->prob]
         probabilities = torch.softmax(single_logits, dim=-1)

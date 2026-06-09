@@ -7,9 +7,12 @@ from api_checks.model import ModelInformationCalculatorF32
 import api_checks.utils as utils
 from urllib.parse import quote
 
+
 class APICache:
     def __init__(self, cache_path: Path, hf_token):
         self.cache_path = cache_path
+        self.results_cache_path = self.cache_path / "run_results"
+        self.unembedding_matricies_cache_path = self.cache_path / "unembedding_matracies"
         self.information_calculator_dict: dict[str, ModelInformationCalculatorF32] = {}
         self.hf_token = hf_token
 
@@ -23,7 +26,7 @@ class APICache:
                 model = utils.get_model(model_name, self.hf_token)
                 self.information_calculator_dict[model_name] = ModelInformationCalculatorF32(model)
             result = self.information_calculator_dict[model_name].calc(prompt)
-            self._dump(model_name=model_name,prompt=prompt,result=result)
+            self._dump(model_name=model_name, prompt=prompt, result=result)
             print("Result saved in cache sucessfully")
             return result
 
@@ -33,14 +36,34 @@ class APICache:
             self.information_calculator_dict[model_name] = ModelInformationCalculatorF32(model)
         return self.information_calculator_dict[model_name]
 
+    def get_unembedding_matrix(self, model_name: str) -> torch.Tensor:
+        unembedding_matrix_path = self.unembedding_matricies_cache_path / self._get_unembedding_key_name(model_name)
+        self.unembedding_matricies_cache_path.mkdir(parents=True, exist_ok=True)
+        try:
+            return torch.load(unembedding_matrix_path)
+        except FileNotFoundError:
+            model = self.get_infomration_calculator(model_name).model
+            with model.trace("abdsfas", remote=True):
+                unembedding_matrix = model.lm_head.weight.save()
+            unembedding_matrix = unembedding_matrix.detach().float().contiguous()
+            torch.save(unembedding_matrix, unembedding_matrix_path)
+            return unembedding_matrix
+
     @classmethod
-    def _get_key_name(cls, model_name: str, prompt: str) -> str:
-        return quote(f"{model_name}|||{prompt}",safe='')
+    def _get_result_key_name(cls, model_name: str, prompt: str) -> str:
+        return quote(f"{model_name}|||{prompt}", safe="")
+
+    @classmethod
+    def _get_unembedding_key_name(
+        cls,
+        model_name: str,
+    ) -> str:
+        return quote(f"{model_name}", safe="")
 
     def _dump(self, result: FullRunResults, model_name: str, prompt: str) -> Path:
         # serialize tensors + scalars to a single .pt file keyed by `key`
-        self.cache_path.mkdir(parents=True, exist_ok=True)
-        path = self.cache_path / f"{self._get_key_name(model_name,prompt)}.pt"
+        self.results_cache_path.mkdir(parents=True, exist_ok=True)
+        path = self.results_cache_path / f"{self._get_result_key_name(model_name,prompt)}.pt"
         payload = {
             "logits": result.logits,
             "post_mlp_contribution": result.contributions.post_mlp_contribution,
@@ -55,7 +78,7 @@ class APICache:
         return path
 
     def _load(self, model_name: str, prompt: str) -> tuple[FullRunResults, datetime.datetime]:
-        path = self.cache_path / f"{self._get_key_name(model_name,prompt)}.pt"
+        path = self.results_cache_path / f"{self._get_result_key_name(model_name,prompt)}.pt"
         creation_datetime = utils.get_creation_datetime(path)
         payload = torch.load(path, weights_only=False)
         return (
