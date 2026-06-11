@@ -11,6 +11,8 @@ import torch.nn as nn
 import sys
 import os
 
+from api_checks.position import LLMResidualPosition
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pydantic import BaseModel
@@ -31,12 +33,30 @@ class Contributions(BaseModel):
     post_mlp_contribution: Tensor  # (layer,position,source,d_model)
     post_attention_contribution: Tensor  # (layer,position,source,d_model)
 
+    def __getitem__(self, position: LLMResidualPosition):
+        return self.get_by_position(position)
+
+    def get_by_position(self, position: LLMResidualPosition):
+        if position.is_mlp:
+            return self.post_mlp_contribution[position.layer][position.token_position]
+        else:
+            return self.post_attention_contribution[position.layer][position.token_position]
+
     model_config = SettingsConfigDict(arbitrary_types_allowed=True)
 
 
 class ResidualStream(BaseModel):
     mlp_residual: Tensor  # (layer,position,d_model)
     attention_residual: Tensor  # (layer,position,d_model)
+
+    def __getitem__(self, position: LLMResidualPosition):
+        return self.get_by_position(position)
+
+    def get_by_position(self, position: LLMResidualPosition):
+        if position.is_mlp:
+            return self.mlp_residual[position.layer][position.token_position]
+        else:
+            return self.attention_residual[position.layer][position.token_position]
 
     model_config = SettingsConfigDict(arbitrary_types_allowed=True)
 
@@ -59,6 +79,7 @@ class FullRunResults(BaseModel):
     dimentions: ResultsDimentions
 
     model_config = SettingsConfigDict(arbitrary_types_allowed=True)
+
     @deprecated("Use Only for quick tests")
     def dump(self, key: str) -> Path:
         # serialize tensors + scalars to a single .pt file keyed by `key`
@@ -76,6 +97,7 @@ class FullRunResults(BaseModel):
         }
         torch.save(payload, path)
         return path
+
     @classmethod
     @deprecated("Use only for quick tests")
     def load(cls, key: str) -> "FullRunResults":

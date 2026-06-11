@@ -1,4 +1,4 @@
-from api_checks.model import ModelInformationCalculatorF32
+from api_checks.model_calculator import ModelInformationCalculatorF32
 from info_flow.config import Config
 from info_flow.ex6_better_percision_key_in_mat_f32 import FullRunResults
 from info_flow.ex4_models_norms_percisions import ModelInformationCalculatorRealNorms

@@ -3,39 +3,40 @@ from pathlib import Path
 
 from api_checks.full_run_result import Contributions, FullRunResults, ResidualStream, ResultsDimentions
 import torch
-from api_checks.model import ModelInformationCalculatorF32
+from api_checks.model_calculator import ModelInformationCalculatorF32
 import api_checks.utils as utils
+from functools import lru_cache
 from urllib.parse import quote
 
 
 class APICache:
+    # Two levels cache, memory (managed by functools.lru_cach, both for large results and no need to connect each time), and disk
     def __init__(self, cache_path: Path, hf_token):
         self.cache_path = cache_path
         self.results_cache_path = self.cache_path / "run_results"
         self.unembedding_matricies_cache_path = self.cache_path / "unembedding_matracies"
-        self.information_calculator_dict: dict[str, ModelInformationCalculatorF32] = {}
         self.hf_token = hf_token
+        self.latest_model_name: str
 
+    @lru_cache(maxsize=1)
     def get_full_run_results(self, model_name: str, prompt: str) -> FullRunResults:
         try:
             result, time = self._load(model_name, prompt)
             print(f"CACHE HIT {model_name} {prompt} {time}")
             return result
         except FileNotFoundError:
-            if model_name not in self.information_calculator_dict:
-                model = utils.get_model(model_name, self.hf_token)
-                self.information_calculator_dict[model_name] = ModelInformationCalculatorF32(model)
-            result = self.information_calculator_dict[model_name].calc(prompt)
+            information_calculator = self.get_infomration_calculator(model_name)
+            result = information_calculator.calc(prompt)
             self._dump(model_name=model_name, prompt=prompt, result=result)
             print("Result saved in cache sucessfully")
             return result
 
-    def get_infomration_calculator(self, model_name: str):
-        if model_name not in self.information_calculator_dict:
-            model = utils.get_model(model_name, self.hf_token)
-            self.information_calculator_dict[model_name] = ModelInformationCalculatorF32(model)
-        return self.information_calculator_dict[model_name]
+    @lru_cache(maxsize=10)
+    def get_infomration_calculator(self, model_name: str) -> ModelInformationCalculatorF32:
+        model = utils.get_model(model_name, self.hf_token)
+        return ModelInformationCalculatorF32(model)
 
+    @lru_cache(maxsize=1)
     def get_unembedding_matrix(self, model_name: str) -> torch.Tensor:
         unembedding_matrix_path = self.unembedding_matricies_cache_path / self._get_unembedding_key_name(model_name)
         self.unembedding_matricies_cache_path.mkdir(parents=True, exist_ok=True)
@@ -43,7 +44,7 @@ class APICache:
             return torch.load(unembedding_matrix_path)
         except FileNotFoundError:
             model = self.get_infomration_calculator(model_name).model
-            with model.trace("abdsfas", remote=True):
+            with model.trace("", remote=True):
                 unembedding_matrix = model.lm_head.weight.save()
             unembedding_matrix = unembedding_matrix.detach().float().contiguous()
             torch.save(unembedding_matrix, unembedding_matrix_path)

@@ -11,13 +11,13 @@ from pydantic_settings import SettingsConfigDict
 from api_checks.full_run_result import Contributions, FullRunResults, ResidualStream, ResultsDimentions
 from torch import Tensor
 import torch.nn as nn
-import sys
-import os
 
 
 from pydantic import BaseModel
 import torch  # noqa: E402
 import einops as ein
+import heapq
+from api_checks.position import LLMResidualPosition
 
 
 def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, prompt: str, remote: bool | str = True):  # ->(layer,position,source,d_model), (layer,position,source,d_model)
@@ -131,10 +131,30 @@ class ModelInformationCalculatorF32:
     def calc_tokens(self, prompt: str) -> list[str]:
         tokens_ids = self.tokenizer(prompt)["input_ids"]
         return [self.tokenizer.decode([id]) for id in tokens_ids]
-    
 
-    def tokens_probabilities_from_logits(self, single_logits: torch.Tensor, min_prob=0.04) -> dict[str, float]:  # logits: (vocab_size) return dict[token->prob]
+    def tokens_probabilities_from_logits(self, single_logits: torch.Tensor, max_results_amount: int = 5, min_prob=0.02) -> dict[str, float]:  # logits: (vocab_size) return dict[token->prob]
         probabilities = torch.softmax(single_logits, dim=-1)
         ids_probabilities = sorted(list(enumerate(probabilities.tolist())), key=lambda p_id: p_id[1], reverse=True)
         filtered_probabilities = [i_p for i_p in ids_probabilities if i_p[1] >= min_prob]
+        filtered_probabilities_trimmed = filtered_probabilities[:max_results_amount]
+        return OrderedDict({self.tokenizer.decode([id]): probability for id, probability in filtered_probabilities_trimmed})
+
+    def calc_top_probabilities_from_logits(self, single_logits: torch.Tensor, number_of_points: int):  # logits: (vocab_size) return dict[token->prob]
+        probabilities = torch.softmax(single_logits, dim=-1)
+        ids_probabilities = sorted(list(enumerate(probabilities.tolist())), key=lambda p_id: p_id[1], reverse=True)
+        filtered_probabilities = ids_probabilities[:number_of_points]
         return OrderedDict({self.tokenizer.decode([id]): probability for id, probability in filtered_probabilities})
+
+    def calc_logits_contributions_by_token(self, run_result: FullRunResults, position: LLMResidualPosition, unembedding_matrix: torch.Tensor, token: str) -> torch.Tensor:
+        tokens = self.tokenizer.tokenize(token)
+        token_id = self.tokenizer.convert_tokens_to_ids(tokens[0])
+        return self.calc_logits_contributions(run_result, position, unembedding_matrix, token_id)
+
+    def calc_logits_contributions(self, run_result: FullRunResults, position: LLMResidualPosition, unembedding_matrix: torch.Tensor, logit_id: int) -> torch.Tensor:  # (p_len) (contributions to logits size)
+        residual_contributions = run_result.contributions[position]  # (p_len,d_model)
+        return residual_contributions @ unembedding_matrix[logit_id]  # (p_len) = (p_len,d_model) x (d_model)
+    
+    def calc_top_perdictions_from_vector(vector:torch.Tensor,unembedding_matrix:torch.Tensor):
+        logits = unembedding_matrix @ vector
+        return token_probabilities
+        
