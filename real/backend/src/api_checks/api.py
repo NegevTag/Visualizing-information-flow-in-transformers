@@ -59,7 +59,6 @@ def get_top_logit_contributions():  # (prompt_len)
 @app.post("/load_unembedding")
 def get_unembeddings() -> None:
     unembedding = api_cache.get_unembedding_matrix(app.state.args.model)
-    print(unembedding.shape)
     return
 
 
