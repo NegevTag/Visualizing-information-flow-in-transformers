@@ -49,7 +49,13 @@ class APICache:
             unembedding_matrix = unembedding_matrix.detach().float().contiguous()
             torch.save(unembedding_matrix, unembedding_matrix_path)
             return unembedding_matrix
-
+    @lru_cache(maxsize=1)
+    def get_last_rms_weight(self, model_name: str) -> torch.Tensor:
+        model = self.get_infomration_calculator(model_name).model
+        with model.trace("", remote=True):
+            rms_weight = model.model.norm.weight.save()
+        return rms_weight
+    
     @classmethod
     def _get_result_key_name(cls, model_name: str, prompt: str) -> str:
         return quote(f"{model_name}|||{prompt}", safe="")
