@@ -57,3 +57,19 @@ local machine, and a single-machine commit is one disk-failure away from
 being lost. Pushing is cheap, non-destructive, and makes the phase commit
 visible. The previous default ("commit, don't push, don't open a PR") was too
 conservative — it conflated "don't merge" (correct) with "don't push" (wrong).
+
+---
+
+## SAE feature lens decisions (2026-06-18)
+
+SAE analog of the logit-lens cell (`sae_feature_lens.py` + `.ipynb`).
+
+| # | Question | Decision | Rationale |
+|---|----------|----------|-----------|
+| 14 | Which SAE | Llama Scope **8x / 32,768-feature residual** SAEs (`release="llama_scope_lxr_8x"`, `sae_id="l{L}r_8x"`, HF `fnlp/Llama3_1-8B-Base-LXR-8x`). | These are exactly the SAEs Neuronpedia indexes as `llama3.1-8b/{L}-llamascope-res-32k`, so local feature indices line up 1:1 for description lookup. `R` (post-block residual) matches our `is_mlp=True` contributions; SAE layer `L` ↔ `LLMResidualPosition(layer=L, is_mlp=True)`. Verified by loading (`d_in=4096, d_sae=32768`). |
+| 15 | Local SAE vs Neuronpedia inference | **Run the SAE encoder locally** (`sae_lens`); use Neuronpedia only to fetch feature **descriptions** via the public GET endpoint. | Neuronpedia's activation API takes *text*, not vectors. Our contributions are *decomposed* vectors, not real activations, so they can't go through the text endpoint. |
+| 16 | Layer | **Parameter**, default last layer (31). | Matches the logit cell by default; sweepable. |
+| 17 | BOS / source-0 removal | **Raw view only** (no projection-out of the start direction). | Supervisor preference. |
+| 18 | Keep encoder bias? | **Yes — keep the full encoder** (`b_enc` + ReLU + TopK). | Verified Llama Scope *has* `b_enc` (paper Eqs. 1/5); it is the SAE's threshold/notion of "active". Dropping it would change the quantity to a linear alignment score and surface features the SAE calls inactive. (Supersedes the "TopK has no bias → scale-invariant" idea, which was based on a false premise.) |
+| 19 | Magnitude normalization | **Rescale each contribution's direction to the real residual norm at that position** (`run.precise[pos].norm()`), with a `raw` toggle for comparison. | Because `b_enc` is a fixed threshold for full-strength activations, top-features is scale-dependent. Empirically (layer 31) the raw `hate` contribution (norm 11.2 vs 87.7) collapses to one feature + zeros; normalized it recovers a rich top-5. Direct analog of the RMSNorm the logit lens applies before unembedding. |
+| 20 | Location | `project_scratchpad/` (helper module + notebook), `sae-lens` added to `real/backend/pyproject.toml`. | Supervisor preference; reuses the backend env/cache the existing notebook already uses. |

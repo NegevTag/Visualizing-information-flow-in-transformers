@@ -204,4 +204,43 @@ time (`1 / sqrt(mean(x^2) + eps)`), no separate capture needed.
 The only Phase-2 design choice left from the original two open items is the
 **batching strategy** (how many `.save()` calls per `model.trace()`). The
 attention-weights question is closed.
-?
+
+---
+
+## 2026-06-18 — SAE feature lens for per-source contributions
+
+Built the SAE analog of the logit-lens cell: decode each per-source contribution
+into its top-5 **SAE features** instead of top-5 logits. New files
+`project_scratchpad/sae_feature_lens.py` (helper) + `sae_feature_lens.ipynb`;
+added `sae-lens` to `real/backend/pyproject.toml`; checks in
+`real/backend/src/tests/scratchpad/check_sae_lens.py`. Reuses the cached
+`FullRunResults` — no remote run.
+
+**Verified (ran `check_sae_lens.py`), not guessed:**
+- SAE = Llama Scope 8x/32K residual: `release="llama_scope_lxr_8x"`,
+  `sae_id=f"l{L}r_8x"`, HF `fnlp/Llama3_1-8B-Base-LXR-8x`. Loaded layer 31:
+  `d_in=4096, d_sae=32768`. TopK k=50. These are exactly the SAEs Neuronpedia
+  indexes as `llama3.1-8b/{L}-llamascope-res-32k`, so indices align for lookup.
+- Neuronpedia public GET `…/api/feature/{model}/{L}-llamascope-res-32k/{idx}`
+  returns an `explanations` list; `explanations[0]["description"]` is the text
+  (e.g. feature 15278 → *"quantitative data and numerical references in
+  financial contexts"*). Field path confirmed against a live response.
+
+**Key finding — why magnitude normalization is mandatory.** The Llama Scope
+encoder has a bias threshold ($f(x)=\mathrm{ReLU}(W^{enc}x+b^{enc})$, paper
+Eqs. 1/5). A per-source contribution is only a fraction of a real residual
+(`hate` contribution norm **11.2** vs full-residual norm **87.7** at layer 31).
+Fed raw, it collapses: only **one** feature fires (act 2.27) and the rest hit the
+bias floor `0.0`. Rescaling its *direction* to the real residual norm
+(`normalize_to=resid_norm`) recovers a full, content-bearing top-5
+(acts 17.3, 13.4, 11.6, 10.6, 9.0). This is the SAE analog of the RMSNorm the
+logit lens applies before unembedding.
+
+**Lesson / pitfall avoided:** the supervisor's idea of dropping the encoder bias
+to get scale-invariance would have changed the quantity from "active SAE
+features" to a linear alignment score (and Llama Scope *does* have `b_enc`, so the
+"TopK has no bias" premise was false). Kept the real encoder + normalized the
+magnitude instead.
+
+**Gotcha:** `sae.encode` output keeps `requires_grad`; wrap in `torch.no_grad()`
+(or `.detach()`) before `float()` to avoid the scalar-conversion warning.
