@@ -81,6 +81,9 @@ function Bar({ row, height, selected, n, isMLP }) {
 export default function InfoFlow() {
   const [prompt, setPrompt] = useState("the cat sat");
   const [data, setData] = useState(null); // {tokens, attention_norms, mlp_norms, top_perdictions}
+  // Per-source contributions to the top output logit (list[float], length N).
+  // Fetched in parallel from /top_logit_contributions.
+  const [topLogitContribs, setTopLogitContribs] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -111,15 +114,22 @@ export default function InfoFlow() {
     setError(null);
     setSelected(null);
     try {
-      const res = await fetch(`http://127.0.0.1:8000/?prompt=${encodeURIComponent(prompt)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      // Sequential: backend caches the model run, so / must complete (and
+      // populate the cache) before /top_logit_contributions can hit it cheaply.
+      const url = (p) => `http://127.0.0.1:8000${p}?prompt=${encodeURIComponent(prompt)}`;
+      const mainRes = await fetch(url("/"));
+      if (!mainRes.ok) throw new Error(`HTTP ${mainRes.status}`);
+      const json = await mainRes.json();
       setData(json);
+      // top_logit_contributions is best-effort — don't fail the whole view if it errors.
+      const logitRes = await fetch(url("/top_logit_contributions"));
+      setTopLogitContribs(logitRes.ok ? await logitRes.json() : null);
       // New prompt = new tokens; reset hide state to "first token hidden".
       setHidden(new Set([0]));
     } catch (e) {
       setError(String(e));
       setData(null);
+      setTopLogitContribs(null);
     } finally {
       setLoading(false);
     }
@@ -371,6 +381,42 @@ export default function InfoFlow() {
           {/* grid — wrapped in zoom/pan surface (mouse wheel zooms centered
               on the cursor, click-drag pans, reset button top-right). */}
           <ZoomPanVanilla>
+            {/* Top-logit contributions: a single bar sitting above the last
+                (rightmost) column, sized to match an attention row. Sources
+                that are hidden in the rest of the grid are also hidden here. */}
+            {topLogitContribs && topLogitContribs.length === N && (
+              <div
+                style={{ display: "flex", alignItems: "center", marginBottom: 8 }}
+              >
+                <div
+                  style={{
+                    width: LW,
+                    flexShrink: 0,
+                    textAlign: "right",
+                    paddingRight: 8,
+                    fontFamily: MONO,
+                    fontSize: 10,
+                    color: "#333",
+                    fontWeight: 700,
+                  }}
+                >
+                  logit
+                </div>
+                {tokens.map((_, pos) => (
+                  <div key={pos} style={{ width: CW, padding: "0 2px" }}>
+                    {pos === N - 1 && (
+                      <Bar
+                        row={applyHidden(normalizeRow(topLogitContribs), hidden)}
+                        height={AH}
+                        selected={selected}
+                        n={N}
+                        isMLP={false}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {rows.map((row, ri) => {
               const isMLP = row.type === "mlp";
               // styleAsMLP drives the visual treatment (height, text size,

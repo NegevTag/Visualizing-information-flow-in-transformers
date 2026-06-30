@@ -2,7 +2,7 @@ import datetime
 from pathlib import Path
 
 import nnsight
-
+import safetensors
 
 def get_model(model_name: str, hf_token: str) -> nnsight.LanguageModel:
     model_kwargs_dict = {"token": hf_token}
