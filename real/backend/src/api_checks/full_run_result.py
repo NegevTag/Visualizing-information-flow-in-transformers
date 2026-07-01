@@ -73,7 +73,6 @@ LOCAL_STORAGE_DIR = Path(__file__).resolve().parent / "local_storage"
 
 
 class FullRunResults(BaseModel):
-    logits: torch.Tensor  # (p_len,vocab_size)
     contributions: Contributions
     precise: ResidualStream
     dimentions: ResultsDimentions

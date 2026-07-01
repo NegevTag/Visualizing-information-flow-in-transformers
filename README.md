@@ -11,6 +11,8 @@ gate values from a normal forward pass, the residual stream becomes a *linear*
 function of the per-source contributions. That linearity is what lets us
 attribute every position's residual back to the source tokens that produced it.
 
+![Information flow visualization](project_scratchpad/to_send/For%20readme.png)
+
 ---
 
 ## Repository layout
