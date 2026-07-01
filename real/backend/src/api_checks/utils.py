@@ -46,7 +46,7 @@ def group_contributions(mask: list[Any], contributions: Contributions) -> Contri
         if a not in group_identifiers:
             group_identifiers.append(a)
         indexed_mask.append(group_identifiers.index(a))
-    mask_matrix = torch.nn.functional.one_hot(torch.tensor(mask, dtype=torch.long)).float()
+    mask_matrix =torch.nn.functional.one_hot(torch.tensor(mask, dtype=torch.long)).float()
     grouped_post_mlp_contributions = torch.einsum("lpsd,sg -> lpgd ", contributions.post_mlp_contribution, mask_matrix)
     grouped_post_attetnion_contributions = torch.einsum("lpsd,sg -> lpgd", contributions.post_attention_contribution, mask_matrix)
     return Contributions(post_mlp_contribution=grouped_post_mlp_contributions, post_attention_contribution=grouped_post_attetnion_contributions)
