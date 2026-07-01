@@ -81,9 +81,6 @@ function Bar({ row, height, selected, n, isMLP }) {
 export default function InfoFlow() {
   const [prompt, setPrompt] = useState("the cat sat");
   const [data, setData] = useState(null); // {tokens, attention_norms, mlp_norms, top_perdictions}
-  // Per-source contributions to the top output logit (list[float], length N).
-  // Fetched in parallel from /top_logit_contributions.
-  const [topLogitContribs, setTopLogitContribs] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -95,6 +92,16 @@ export default function InfoFlow() {
   // MLP rows get the thick/saturated one. Row positions and label text stay
   // put — only height/font-size/color-saturation flip.
   const [swap, setSwap] = useState(false);
+
+  // Grouping: when on, the source dim of the norm arrays is num_groups instead
+  // of num_tokens. Position dim is unchanged. groupedData caches the response
+  // from /group_by_words for the current prompt (so toggling is cheap).
+  //
+  // Kept general so a future "custom grouping" feature can plug in the same
+  // way — anything that produces {attention_norms, mlp_norms, group} will do.
+  const [groupByWords, setGroupByWords] = useState(true);
+  const [groupedData, setGroupedData] = useState(null); // {attention_norms, mlp_norms, group}
+  const [groupLoading, setGroupLoading] = useState(false);
 
   function toggleHidden(i) {
     setHidden((prev) => {
@@ -113,52 +120,103 @@ export default function InfoFlow() {
     setLoading(true);
     setError(null);
     setSelected(null);
+    // New prompt = new tokens = old grouped payload is stale.
+    setGroupedData(null);
     try {
-      // Sequential: backend caches the model run, so / must complete (and
-      // populate the cache) before /top_logit_contributions can hit it cheaply.
-      const url = (p) => `http://127.0.0.1:8000${p}?prompt=${encodeURIComponent(prompt)}`;
-      const mainRes = await fetch(url("/"));
-      if (!mainRes.ok) throw new Error(`HTTP ${mainRes.status}`);
-      const json = await mainRes.json();
+      const url = `http://127.0.0.1:8000/?prompt=${encodeURIComponent(prompt)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
       setData(json);
-      // top_logit_contributions is best-effort — don't fail the whole view if it errors.
-      const logitRes = await fetch(url("/top_logit_contributions"));
-      setTopLogitContribs(logitRes.ok ? await logitRes.json() : null);
       // New prompt = new tokens; reset hide state to "first token hidden".
       setHidden(new Set([0]));
+      // Group-by-words is on by default: fetch the grouped payload right
+      // after `/` so the initial render is already grouped. Sequential
+      // because /group_by_words reads app.state.args.prompt set by `/`.
+      if (groupByWords) {
+        const gres = await fetch("http://127.0.0.1:8000/group_by_words", { method: "POST" });
+        if (!gres.ok) throw new Error(`HTTP ${gres.status}`);
+        setGroupedData(await gres.json());
+      }
     } catch (e) {
       setError(String(e));
       setData(null);
-      setTopLogitContribs(null);
     } finally {
       setLoading(false);
     }
   }
 
+  // Toggle grouping on/off. First time on for a given prompt: POST
+  // /group_by_words and cache the response. Off: fire-and-forget POST /ungroup
+  // to clear server-side mask (no need to await — we already have the
+  // ungrouped payload from `/`).
+  //
+  // Meanings of `selected` and `hidden` (source indices) differ between modes,
+  // so both reset on every flip.
+  async function toggleGroupByWords(checked) {
+    setSelected(null);
+    setHidden(new Set([0]));
+    if (checked) {
+      if (!groupedData) {
+        setGroupLoading(true);
+        try {
+          const res = await fetch("http://127.0.0.1:8000/group_by_words", { method: "POST" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          setGroupedData(await res.json());
+        } catch (e) {
+          setError(String(e));
+          setGroupLoading(false);
+          return;
+        }
+        setGroupLoading(false);
+      }
+      setGroupByWords(true);
+    } else {
+      setGroupByWords(false);
+      // Fire-and-forget: don't block UI, don't care if it fails.
+      fetch("http://127.0.0.1:8000/ungroup", { method: "POST" }).catch(() => {});
+    }
+  }
+
+  // Grouping-aware source-space derivation.
+  //
+  // - `grouping`: length-N list where grouping[i] = source index (group id) of
+  //   token i, or null if ungrouped.
+  // - `numSources`: size of the source dim in the norm arrays (num_groups when
+  //   grouped, num_tokens otherwise). Used for palette scaling and Bar's `n`.
+  // - `tokenToSource[i]`: source index that token i maps to. Identity when
+  //   ungrouped; equals `grouping[i]` when grouped. All color / click / hide
+  //   logic on the token-side of the UI maps through this so tokens in the
+  //   same word share color and interactions.
+  const tokens = data?.tokens ?? [];
+  const N = tokens.length;
+  const grouping = groupByWords && groupedData ? groupedData.group : null;
+  const numSources = grouping ? Math.max(...grouping) + 1 : N;
+  const tokenToSource = grouping ?? tokens.map((_, i) => i);
+  const attnN = grouping ? groupedData.attention_norms : data?.attention_norms;
+  const mlpN = grouping ? groupedData.mlp_norms : data?.mlp_norms;
+
   // Build a flat list of rows: [attn_0, mlp_0, attn_1, mlp_1, ...]; then reverse
   // so output sits on top and input on bottom, matching the synthetic demo.
   const rows = useMemo(() => {
-    if (!data) return [];
-    const { attention_norms, mlp_norms } = data;
-    const L = attention_norms.length;
+    if (!attnN || !mlpN) return [];
+    const L = attnN.length;
     const list = [];
     for (let l = 0; l < L; l++) {
       list.push({
         type: "attn",
         layer: l,
-        dist: attention_norms[l].map((r) => applyHidden(normalizeRow(r), hidden)),
+        dist: attnN[l].map((r) => applyHidden(normalizeRow(r), hidden)),
       });
       list.push({
         type: "mlp",
         layer: l,
-        dist: mlp_norms[l].map((r) => applyHidden(normalizeRow(r), hidden)),
+        dist: mlpN[l].map((r) => applyHidden(normalizeRow(r), hidden)),
       });
     }
     return list.reverse();
-  }, [data, hidden]);
+  }, [attnN, mlpN, hidden]);
 
-  const tokens = data?.tokens ?? [];
-  const N = tokens.length;
   // 1.5× wider than the previous 40–90 range. With zoom + pan available now,
   // it's fine if not all columns fit on screen at once.
   const CW = N > 0 ? Math.max(60, Math.min(135, Math.floor(900 / N))) : 90;
@@ -273,37 +331,66 @@ export default function InfoFlow() {
 
       {data && N > 0 && (
         <>
+          {/* grouping controls — toggle regroups the source dim of the norm
+              arrays. Kept general so a future "custom grouping" mode can plug
+              in alongside this checkbox. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 12,
+              fontFamily: MONO,
+              fontSize: 10,
+              color: "#666",
+            }}
+          >
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={groupByWords}
+                disabled={groupLoading}
+                onChange={(e) => toggleGroupByWords(e.target.checked)}
+                style={{ margin: 0 }}
+              />
+              group by words{groupLoading ? " …" : ""}
+            </label>
+          </div>
+
           {/* token legend — click to trace */}
           <div style={{ display: "flex", gap: 14, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 9, color: "#bbb", textTransform: "uppercase", letterSpacing: ".08em" }}>
               trace:
             </span>
             {tokens.map((tok, i) => {
-              const active = selected === i;
-              const isHidden = hidden.has(i);
+              // In grouped mode, s is the group id for token i, so tokens in
+              // the same word share color, selected state, and hidden state.
+              const s = tokenToSource[i];
+              const active = selected === s;
+              const isHidden = hidden.has(s);
               const dim = selected !== null && !active;
               return (
                 <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                   <button
-                    onClick={() => !isHidden && setSelected(active ? null : i)}
+                    onClick={() => !isHidden && setSelected(active ? null : s)}
                     disabled={isHidden}
                     style={{
                       fontFamily: MONO,
                       fontSize: 12,
                       fontWeight: active ? 700 : 500,
-                      color: isHidden ? "#ccc" : dim ? "#ddd" : colorFor(i, N),
+                      color: isHidden ? "#ccc" : dim ? "#ddd" : colorFor(s, numSources),
                       textDecoration: isHidden ? "line-through" : "none",
                       background: "none",
                       border: "none",
                       padding: 0,
                       cursor: isHidden ? "default" : "pointer",
-                      borderBottom: active ? `2px solid ${colorFor(i, N)}` : "2px solid transparent",
+                      borderBottom: active ? `2px solid ${colorFor(s, numSources)}` : "2px solid transparent",
                     }}
                   >
                     {tok}
                   </button>
                   <button
-                    onClick={() => toggleHidden(i)}
+                    onClick={() => toggleHidden(s)}
                     title={isHidden ? "show" : "hide"}
                     style={{
                       fontFamily: MONO,
@@ -381,42 +468,6 @@ export default function InfoFlow() {
           {/* grid — wrapped in zoom/pan surface (mouse wheel zooms centered
               on the cursor, click-drag pans, reset button top-right). */}
           <ZoomPanVanilla>
-            {/* Top-logit contributions: a single bar sitting above the last
-                (rightmost) column, sized to match an attention row. Sources
-                that are hidden in the rest of the grid are also hidden here. */}
-            {topLogitContribs && topLogitContribs.length === N && (
-              <div
-                style={{ display: "flex", alignItems: "center", marginBottom: 8 }}
-              >
-                <div
-                  style={{
-                    width: LW,
-                    flexShrink: 0,
-                    textAlign: "right",
-                    paddingRight: 8,
-                    fontFamily: MONO,
-                    fontSize: 10,
-                    color: "#333",
-                    fontWeight: 700,
-                  }}
-                >
-                  logit
-                </div>
-                {tokens.map((_, pos) => (
-                  <div key={pos} style={{ width: CW, padding: "0 2px" }}>
-                    {pos === N - 1 && (
-                      <Bar
-                        row={applyHidden(normalizeRow(topLogitContribs), hidden)}
-                        height={AH}
-                        selected={selected}
-                        n={N}
-                        isMLP={false}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
             {rows.map((row, ri) => {
               const isMLP = row.type === "mlp";
               // styleAsMLP drives the visual treatment (height, text size,
@@ -444,7 +495,7 @@ export default function InfoFlow() {
                   </div>
                   {row.dist.map((posRow, pos) => (
                     <div key={pos} style={{ width: CW, padding: "0 2px" }}>
-                      <Bar row={posRow} height={rh} selected={selected} n={N} isMLP={styleAsMLP} />
+                      <Bar row={posRow} height={rh} selected={selected} n={numSources} isMLP={styleAsMLP} />
                     </div>
                   ))}
                 </div>
@@ -460,14 +511,15 @@ export default function InfoFlow() {
             <div style={{ display: "flex", marginTop: 4, alignItems: "center" }}>
               <div style={{ width: LW, flexShrink: 0, paddingRight: 8 }} />
               {tokens.map((_, i) => {
-                const isHidden = hidden.has(i);
-                const dim = selected !== null && selected !== i;
+                const s = tokenToSource[i];
+                const isHidden = hidden.has(s);
+                const dim = selected !== null && selected !== s;
                 return (
                   <div key={i} style={{ width: CW, padding: "0 2px" }}>
                     <div
                       style={{
                         height: 2,
-                        background: isHidden || dim ? "#eee" : colorFor(i, N),
+                        background: isHidden || dim ? "#eee" : colorFor(s, numSources),
                       }}
                     />
                   </div>
@@ -479,13 +531,14 @@ export default function InfoFlow() {
             <div style={{ display: "flex", marginTop: 4, alignItems: "center" }}>
               <div style={{ width: LW, flexShrink: 0, paddingRight: 8 }} />
               {tokens.map((tok, i) => {
-                const isHidden = hidden.has(i);
+                const s = tokenToSource[i];
+                const isHidden = hidden.has(s);
                 return (
                   // Wrapper matches the bar cell (width: CW, padding: 0 2px)
                   // so labels line up exactly with the columns above.
                   <div key={i} style={{ width: CW, padding: "0 2px" }}>
                     <button
-                      onClick={() => !isHidden && setSelected(selected === i ? null : i)}
+                      onClick={() => !isHidden && setSelected(selected === s ? null : s)}
                       disabled={isHidden}
                       style={{
                         width: "100%",
@@ -494,9 +547,9 @@ export default function InfoFlow() {
                         fontWeight: 700,
                         color: isHidden
                           ? "#ccc"
-                          : selected !== null && selected !== i
+                          : selected !== null && selected !== s
                           ? "#ccc"
-                          : colorFor(i, N),
+                          : colorFor(s, numSources),
                         textDecoration: isHidden ? "line-through" : "none",
                         background: "none",
                         border: "none",

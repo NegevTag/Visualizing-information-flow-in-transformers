@@ -28,9 +28,9 @@ def get_creation_datetime(path: Path) -> datetime.datetime:
 
 
 def get_group_by_words_mask(tokens: list[str]) -> list[int]:
-    group_ind = 0
-    groups = [0]
-    for token in tokens[1:]:
+    group_ind = 1
+    groups = [0,1]
+    for token in tokens[2:]:
         if not token[0].isalpha():
             group_ind += 1
         groups.append(group_ind)

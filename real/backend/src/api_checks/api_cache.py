@@ -20,7 +20,7 @@ class APICache:
         self.latest_model_name: str
 
     @lru_cache(maxsize=10)
-    def get_contributions(self, model_name: str, prompt: str, mask: tuple[Any] | None):
+    def get_contributions(self, model_name: str, prompt: str, mask: tuple[Any] | None = None):
         if mask == None:
             return self.get_full_run_results(model_name,prompt).contributions
         mask = list(mask)

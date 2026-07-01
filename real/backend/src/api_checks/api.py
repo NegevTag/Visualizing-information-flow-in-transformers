@@ -24,9 +24,12 @@ class ReturnInfo(BaseModel):
     tokens: list[str]
     top_perdictions: dict[str, float]
 
+
 class ContributionsReturnInfo(BaseModel):
     attention_norms: list[list[list[float]]]  # (layer,position,source)
     mlp_norms: list[list[list[float]]]  #
+    group: list[Any]|None
+
 
 class Args(BaseModel):
     model: str = config.info_flow_model
@@ -59,15 +62,23 @@ def load_unembeddings() -> None:
 @app.post("/apply_mask")
 def get_contributions_grouped_by_mask(mask: list[Any]):
     app.state.args.mask = mask
-    masked_contributions =  api_cache.get_contributions(app.state.args.model, app.state.args.prompt, tuple(mask))
-    return ContributionsReturnInfo(attention_norms=masked_contributions.post_attention_contribution.norm(dim=-1),
-                                   mlp_norms = masked_contributions.post_mlp_contribution.norm(dim=-1))
+    masked_contributions = api_cache.get_contributions(app.state.args.model, app.state.args.prompt, tuple(mask))
+    return ContributionsReturnInfo(attention_norms=masked_contributions.post_attention_contribution.norm(dim=-1), mlp_norms=masked_contributions.post_mlp_contribution.norm(dim=-1),group=mask)
+
 
 @app.post("/group_by_words")
 def get_contributions_grouped_by_words():
     tokens = api_cache.get_infomration_calculator(app.state.args.model).calc_tokens(app.state.args.prompt)
     mask = utils.get_group_by_words_mask(tokens)
     return get_contributions_grouped_by_mask(mask)
+
+
+@app.post("/ungroup")
+def ungroup():
+    app.state.args.mask = None
+    contributions = api_cache.get_contributions(app.state.args.model, app.state.args.prompt)
+    return ContributionsReturnInfo(attention_norms=contributions.post_attention_contribution.norm(dim=-1), mlp_norms=contributions.post_mlp_contribution.norm(dim=-1),group = None)
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
