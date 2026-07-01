@@ -26,6 +26,7 @@ class ReturnInfo(BaseModel):
 class Args(BaseModel):
     model: str = config.info_flow_model
     prompt: str | None
+    current_mask : list|None
 
 
 app.state.args = Args(prompt=None)
@@ -49,7 +50,7 @@ def calc_norms(prompt: str):
 def load_unembeddings() -> None:
     api_cache.load_unembedding_matrix(app.state.args.model)
 
-
+def
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)

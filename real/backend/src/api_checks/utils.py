@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Any
 
 import nnsight
-import safetensors
 import torch
+from api_checks.full_run_result import Contributions
 
-from api_checks.full_run_result import FullRunResults
+
+class NotEveryTokenIsAssigned(Exception):
+    pass
 
 
 def get_model(model_name: str, hf_token: str) -> nnsight.LanguageModel:
@@ -25,11 +27,26 @@ def get_creation_datetime(path: Path) -> datetime.datetime:
     return datetime.datetime.fromtimestamp(time_stamp_file_creation)
 
 
-# def group_full_run_result(token_group_idnetifier: dict[str, Any], full_run_result: FullRunResults) -> FullRunResults:
-#     group_identifiers = []
-#     mask = []
-#     for token, token_group_idnetifier in token_group_idnetifier.items():
-#         if token_group_idnetifier not in group_identifiers:
-#             group_identifiers.append(token_group_idnetifier)
-#         mask += group_identifiers.index(token_group_idnetifier)
-#     full_run_result = 
+def group_contributions_by_words(contributions: Contributions, tokens: list[str]):
+    group_ind = 0
+    groups = [0]
+    for token in tokens[1:]:
+        if not token[0].isalpha():
+            group_ind += 1
+        groups.append(group_ind)
+    return group_contributions(groups, contributions)
+
+
+def group_contributions(token_group_idnetifier: list[Any], contributions: Contributions) -> Contributions:
+    if len(token_group_idnetifier) != contributions.post_mlp_contribution.shape[2]:
+        raise NotEveryTokenIsAssigned(f"No every token is assigned: group_len {len(token_group_idnetifier)}, number of tokens {contributions.post_mlp_contribution.shape[2]}")
+    group_identifiers = []
+    mask = []
+    for token_group_idnetifier in token_group_idnetifier:
+        if token_group_idnetifier not in group_identifiers:
+            group_identifiers.append(token_group_idnetifier)
+        mask.append(group_identifiers.index(token_group_idnetifier))
+    mask_matrix = torch.nn.functional.one_hot(torch.tensor(mask, dtype=torch.long)).float()
+    grouped_post_mlp_contributions = torch.einsum("lpsd,sg -> lpgd", contributions.post_mlp_contribution, mask_matrix)
+    grouped_post_attetnion_contributions = torch.einsum("lpsd,sg -> lpgd", contributions.post_attention_contribution, mask_matrix)
+    return Contributions(post_mlp_contribution=grouped_post_mlp_contributions, post_attention_contribution=grouped_post_attetnion_contributions)
