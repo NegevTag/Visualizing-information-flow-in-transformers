@@ -16,6 +16,7 @@ from pydantic import BaseModel
 import torch  # noqa: E402
 import einops as ein
 import heapq
+from api_checks.model_parmeters import ModelParameters
 from api_checks.position import LLMResidualPosition
 
 
@@ -115,8 +116,9 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
 
 
 class ModelInformationCalculatorF32:
-    def __init__(self, model: nnsight.LanguageModel) -> None:
+    def __init__(self, model: nnsight.LanguageModel,model_parameters:ModelParameters) -> None:
         self.model = model
+        self.model_parmeters = model_parameters
         self.tokenizer = self.model.tokenizer
         self.tokenizer.clean_up_tokenization_spaces = False
 
@@ -126,15 +128,6 @@ class ModelInformationCalculatorF32:
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
         info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
         return FullRunResults(contributions=contributiutions, logits=logits, precise=precise, dimentions=info_dimentions)
-
-    def consecutive_cosine_similarities(self, vectors: list[torch.Tensor]) -> list[float]:  # len(vectors) -> len(vectors) - 1
-        """Cosine similarity between each consecutive pair of vectors.
-
-        Given vectors [v0, v1, ..., v_{n-1}], returns [cos(v0,v1), cos(v1,v2), ..., cos(v_{n-2}, v_{n-1})],
-        a list of length n - 1.
-        CLAUDE_WRITTEN
-        """
-        return [torch.nn.functional.cosine_similarity(a, b, dim=0).item() for a, b in zip(vectors, vectors[1:])]
 
     def calc_tokens(self, prompt: str) -> list[str]:
         tokens_ids = self.tokenizer(prompt)["input_ids"]
@@ -153,27 +146,26 @@ class ModelInformationCalculatorF32:
         filtered_probabilities = ids_probabilities[:number_of_points]
         return OrderedDict({self.tokenizer.decode([id]): probability for id, probability in filtered_probabilities})
 
-    def calc_logits_contributions_by_token(self, run_result: FullRunResults, position: LLMResidualPosition, unembedding_matrix: torch.Tensor, token: str) -> torch.Tensor:
-        tokens = self.tokenizer.tokenize(token)
-        token_id = self.tokenizer.convert_tokens_to_ids(tokens[0])
-        return self.calc_logits_contributions(run_result, position, unembedding_matrix, token_id)
 
-    def calc_logits_contributions(self, run_result: FullRunResults, position: LLMResidualPosition, unembedding_matrix: torch.Tensor, logit_id: int) -> torch.Tensor:  # (p_len) (contributions to logits size)
-        residual_contributions = run_result.contributions[position]  # (p_len,d_model)
-        return residual_contributions @ unembedding_matrix[logit_id]  # (p_len) = (p_len,d_model) x (d_model)
 
-    def calc_top_perdictions_from_vector(self, vector: torch.Tensor, unembedding_matrix: torch.Tensor, prediction_num: int = 5, with_last_rms=True, rms_weight: torch.Tensor | None = None) -> dict[float, int]:
+    def calc_top_perdictions_from_vector(self, vector: torch.Tensor, prediction_num: int = 5, with_last_rms=True) -> dict[float, int]:
         if with_last_rms:
-            vector2 = self._calc_last_rms(vector, rms_weight)
-        assert not torch.allclose(vector2,vector)
-        logits = unembedding_matrix @ vector2
+            vector2 = self._calc_last_rms(vector.unsqueeze(0))[0]
+        assert not torch.allclose(vector2, vector)
+        logits = self.model_parmeters.unembedding_matrix @ vector2
         return self.calc_top_probabilities_from_logits(logits, prediction_num)
 
-    def _calc_last_rms(self, vector: Tensor, rms_weight: Tensor) -> Tensor:  # d_model
-        float_vector = vector.float()
-        model = self.model
-        rms_weight_float = rms_weight.float()
-        rms_epsilon = model.model.config.rms_norm_eps
-        ms = float_vector.pow(2).mean(dim=-1)
-        rms_factor = torch.rsqrt(ms + rms_epsilon)  # (prompt_len)
-        return rms_weight_float * (rms_factor * float_vector).to(vector.dtype)
+    def calc_logits(self,last_mlp_output:torch.Tensor)->torch.Tensor: # (p_len,d_model) , (vocab_size,d_model) -> (p_len,vocab_size)
+        post_rms = self._calc_last_rms(last_mlp_output)
+        return post_rms @ self.model_parmeters.unembedding_matrix.T
+        
+    def _calc_last_rms(self, tensor: torch.Tensor) -> torch.Tensor:  # (p_len,d_model)
+        float_vector = tensor.float()  # (p_len,d_model)
+        rms_weight_float = self.model_parmeters.last_rms_weight.float()  # (d_model)
+        rms_epsilon = self.model_parmeters.rms_norm_eps # scalar
+        ms = float_vector.pow(2).mean(dim=-1) # (p_len)
+        rms_factor = torch.rsqrt(ms + rms_epsilon).unsqueeze(dim=1)  # (p_len,1)
+        print(float_vector.shape)
+        print(rms_factor.shape)
+        return (rms_factor * float_vector).to(tensor.dtype)* rms_weight_float  #((p_len,1) *(p_len,d_model) ) *d_model
+

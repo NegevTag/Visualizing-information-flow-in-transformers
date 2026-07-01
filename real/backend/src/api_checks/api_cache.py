@@ -4,6 +4,7 @@ from pathlib import Path
 from api_checks.full_run_result import Contributions, FullRunResults, ResidualStream, ResultsDimentions
 import torch
 from api_checks.model_calculator import ModelInformationCalculatorF32
+from api_checks.model_parmeters import ModelParameters
 import api_checks.utils as utils
 from functools import lru_cache
 from urllib.parse import quote
@@ -14,7 +15,6 @@ class APICache:
     def __init__(self, cache_path: Path, hf_token):
         self.cache_path = cache_path
         self.results_cache_path = self.cache_path / "run_results"
-        self.unembedding_matricies_cache_path = self.cache_path / "unembedding_matracies"
         self.hf_token = hf_token
         self.latest_model_name: str
 
@@ -34,38 +34,16 @@ class APICache:
     @lru_cache(maxsize=10)
     def get_infomration_calculator(self, model_name: str) -> ModelInformationCalculatorF32:
         model = utils.get_model(model_name, self.hf_token)
-        return ModelInformationCalculatorF32(model)
+        model_parameters = ModelParameters(self.cache_path, model)
+        return ModelInformationCalculatorF32(model, model_parameters)
 
-    @lru_cache(maxsize=1)
-    def get_unembedding_matrix(self, model_name: str) -> torch.Tensor:
-        unembedding_matrix_path = self.unembedding_matricies_cache_path / self._get_unembedding_key_name(model_name)
-        self.unembedding_matricies_cache_path.mkdir(parents=True, exist_ok=True)
-        try:
-            return torch.load(unembedding_matrix_path)
-        except FileNotFoundError:
-            model = self.get_infomration_calculator(model_name).model
-            with model.trace("", remote=True):
-                unembedding_matrix = model.lm_head.weight.save()
-            unembedding_matrix = unembedding_matrix.detach().float().contiguous()
-            torch.save(unembedding_matrix, unembedding_matrix_path)
-            return unembedding_matrix
-    @lru_cache(maxsize=1)
-    def get_last_rms_weight(self, model_name: str) -> torch.Tensor:
-        model = self.get_infomration_calculator(model_name).model
-        with model.trace("", remote=True):
-            rms_weight = model.model.norm.weight.save()
-        return rms_weight
-    
+    def load_unembedding_matrix(self, model_name: str):
+        information_calculator = self.get_infomration_calculator(model_name)
+        information_calculator.model_parmeters.unembedding_matrix()
+
     @classmethod
     def _get_result_key_name(cls, model_name: str, prompt: str) -> str:
         return quote(f"{model_name}|||{prompt}", safe="")
-
-    @classmethod
-    def _get_unembedding_key_name(
-        cls,
-        model_name: str,
-    ) -> str:
-        return quote(f"{model_name}", safe="")
 
     def _dump(self, result: FullRunResults, model_name: str, prompt: str) -> Path:
         # serialize tensors + scalars to a single .pt file keyed by `key`
