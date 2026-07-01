@@ -50,7 +50,6 @@ class APICache:
         self.results_cache_path.mkdir(parents=True, exist_ok=True)
         path = self.results_cache_path / f"{self._get_result_key_name(model_name,prompt)}.pt"
         payload = {
-            "logits": result.logits,
             "post_mlp_contribution": result.contributions.post_mlp_contribution,
             "post_attention_contribution": result.contributions.post_attention_contribution,
             "mlp_residual": result.precise.mlp_residual,
@@ -68,7 +67,6 @@ class APICache:
         payload = torch.load(path, weights_only=False)
         return (
             FullRunResults(
-                logits=payload["logits"],
                 contributions=Contributions(
                     post_mlp_contribution=payload["post_mlp_contribution"],
                     post_attention_contribution=payload["post_attention_contribution"],

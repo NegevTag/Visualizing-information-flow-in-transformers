@@ -106,13 +106,8 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
 
             real_mlp_residual[l] = layer.output[0].save()  # (layer,p_len,d_model)
 
-        # output
-        post_last_rms = calc_post_rms_last(post_mlp_contribution[l + 1]).sum(dim=-2)  # (position,d_model)
-        W_lm = model.lm_head.weight  # (vocab_size,d_model)
-        logits = (W_lm @ post_last_rms.to(torch.bfloat16).T).T.save()  # (p_len,vocab_size)
-        print(f"logits shape{logits.shape}")
 
-    return (post_mlp_contribution[1:], post_attention_contribution), logits, (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
+    return (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations
 
 
 class ModelInformationCalculatorF32:
@@ -123,11 +118,11 @@ class ModelInformationCalculatorF32:
         self.tokenizer.clean_up_tokenization_spaces = False
 
     def calc(self, prompt: str, remote: bool | str = True) -> FullRunResults:
-        (post_mlp_contribution, post_attention_contribution), logits, (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt, remote=remote)
+        (post_mlp_contribution, post_attention_contribution), (real_mlp_residual, real_attention_residual) = calc_contribution_per_layer_per_residual(self.model, prompt, remote=remote)
         contributiutions = Contributions(post_mlp_contribution=post_mlp_contribution, post_attention_contribution=post_attention_contribution)
         precise = ResidualStream(attention_residual=real_attention_residual, mlp_residual=real_mlp_residual)
         info_dimentions = ResultsDimentions(layers=post_mlp_contribution.shape[0], prompt_len=real_attention_residual.shape[1], d_model=real_attention_residual.shape[2])
-        return FullRunResults(contributions=contributiutions, logits=logits, precise=precise, dimentions=info_dimentions)
+        return FullRunResults(contributions=contributiutions, precise=precise, dimentions=info_dimentions)
 
     def calc_tokens(self, prompt: str) -> list[str]:
         tokens_ids = self.tokenizer(prompt)["input_ids"]
