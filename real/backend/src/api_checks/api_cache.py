@@ -1,5 +1,6 @@
 import datetime
 from pathlib import Path
+from typing import Any
 
 from api_checks.full_run_result import Contributions, FullRunResults, ResidualStream, ResultsDimentions
 import torch
@@ -17,6 +18,14 @@ class APICache:
         self.results_cache_path = self.cache_path / "run_results"
         self.hf_token = hf_token
         self.latest_model_name: str
+
+    @lru_cache(maxsize=10)
+    def get_contributions(self, model_name: str, prompt: str, mask: tuple[Any] | None):
+        if mask == None:
+            return self.get_full_run_results(model_name,prompt).contributions
+        mask = list(mask)
+        original_contributions = self.get_full_run_results(model_name, prompt).contributions
+        return utils.group_contributions(mask=mask, contributions=original_contributions)
 
     @lru_cache(maxsize=1)
     def get_full_run_results(self, model_name: str, prompt: str) -> FullRunResults:
