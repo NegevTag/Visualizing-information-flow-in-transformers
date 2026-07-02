@@ -109,16 +109,18 @@ export default function InfoFlow() {
   const [customMask, setCustomMask] = useState(null);
   const [groupLoading, setGroupLoading] = useState(false);
   // Custom-mode editing state.
-  //  - pendingSelection: token indices currently rubber-band-selected but not
-  //    yet assigned to a group.
-  //  - dragRect: live rectangle {x0,y0,x1,y1} in trace-row coordinates while
-  //    a rubber-band drag is in progress; null otherwise.
+  //  - pendingSelection: token indices currently in the drag-selected range,
+  //    but not yet assigned to a group.
+  //  - isDragging: true while a text-select-style drag is in progress; used
+  //    only as a hint (e.g. no need for the browser's native text select).
   //  - ctxMenu: right-click menu state {x,y,tokenIdx}, or null when closed.
   const [pendingSelection, setPendingSelection] = useState(() => new Set());
-  const [dragRect, setDragRect] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [ctxMenu, setCtxMenu] = useState(null);
-  const traceRowRef = useRef(null);
   const tokenRefs = useRef([]);
+  // gridWrapperRef wraps <ZoomPanVanilla> so the global drag-select handler
+  // can detect pointerdowns inside the grid (which belong to pan) and bail.
+  const gridWrapperRef = useRef(null);
 
   function toggleHidden(i) {
     setHidden((prev) => {
@@ -259,45 +261,103 @@ export default function InfoFlow() {
     setCtxMenu(null);
   }
 
-  // Rubber-band: pointerdown on the trace-row background (not on a button)
-  // starts a drag; pointermove updates the rect; pointerup hit-tests each
-  // token wrapper's bbox against the rect and stores intersecting indices in
-  // pendingSelection. Only active in custom mode.
-  const onTraceRowPointerDown = (e) => {
-    if (mode !== "custom") return;
-    if (e.button !== 0) return; // left button only
-    if (e.target.closest("button")) return; // let buttons handle their clicks
-    const rect = traceRowRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setDragRect({ x0: x, y0: y, x1: x, y1: y });
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onTraceRowPointerMove = (e) => {
-    if (!dragRect) return;
-    const rect = traceRowRef.current.getBoundingClientRect();
-    setDragRect((r) => r && { ...r, x1: e.clientX - rect.left, y1: e.clientY - rect.top });
-  };
-  const onTraceRowPointerUp = (e) => {
-    if (!dragRect) return;
-    const rect = traceRowRef.current.getBoundingClientRect();
-    const minX = Math.min(dragRect.x0, dragRect.x1) + rect.left;
-    const maxX = Math.max(dragRect.x0, dragRect.x1) + rect.left;
-    const minY = Math.min(dragRect.y0, dragRect.y1) + rect.top;
-    const maxY = Math.max(dragRect.y0, dragRect.y1) + rect.top;
-    const hit = new Set();
+  // Text-select-style drag. Attached to the app root so dragging anywhere
+  // (outside inputs, buttons don't matter — threshold protects them, and
+  // outside the grid so pan keeps working) starts a linear range selection.
+  // Anchor = token nearest to the pointerdown position; focus = token nearest
+  // to the current cursor. Selection = every index in [min(anchor,focus),
+  // max(anchor,focus)] — contiguous, in reading order.
+  const DRAG_THRESHOLD_PX = 3;
+
+  const nearestTokenIdx = (cx, cy) => {
+    let best = -1;
+    let bestD = Infinity;
     for (let i = 0; i < tokenRefs.current.length; i++) {
       const el = tokenRefs.current[i];
       if (!el) continue;
       const b = el.getBoundingClientRect();
-      if (b.left < maxX && b.right > minX && b.top < maxY && b.bottom > minY) hit.add(i);
+      // Distance from cursor to the token's bbox (0 if inside the rect).
+      // Using bbox-distance instead of just clientX makes multi-line
+      // wrapping work: a cursor on line 2 prefers tokens on line 2.
+      const dx = Math.max(b.left - cx, 0, cx - b.right);
+      const dy = Math.max(b.top - cy, 0, cy - b.bottom);
+      const d = Math.hypot(dx, dy);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
     }
-    setPendingSelection(hit);
-    setDragRect(null);
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {}
+    return best;
   };
+
+  const onAppPointerDown = (e) => {
+    if (mode !== "custom") return;
+    if (e.button !== 0) return; // left button only
+    const t = e.target;
+    // Skip: text inputs, buttons and their clicks (they still fire because we
+    // don't preventDefault), the context menu, and the grid area (pan owns
+    // that gesture).
+    if (t.closest && (t.closest("input") || t.closest("textarea"))) return;
+    if (t.closest && t.closest("[data-ctx-menu]")) return;
+    if (gridWrapperRef.current && gridWrapperRef.current.contains(t)) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let anchor = null; // committed at first move past threshold
+    let dragging = false;
+
+    const onMove = (ev) => {
+      if (!dragging) {
+        const d = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+        if (d < DRAG_THRESHOLD_PX) return;
+        anchor = nearestTokenIdx(startX, startY);
+        if (anchor < 0) {
+          cleanup();
+          return;
+        }
+        dragging = true;
+        setIsDragging(true);
+      }
+      const focus = nearestTokenIdx(ev.clientX, ev.clientY);
+      if (focus < 0) return;
+      const lo = Math.min(anchor, focus);
+      const hi = Math.max(anchor, focus);
+      const sel = new Set();
+      for (let i = lo; i <= hi; i++) sel.add(i);
+      setPendingSelection(sel);
+    };
+    const cleanup = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    const onUp = (ev) => {
+      cleanup();
+      setIsDragging(false);
+      if (!dragging) {
+        // Plain click (no drag): treat as "click outside" and clear.
+        setPendingSelection(new Set());
+        return;
+      }
+      // Drag ended — auto-open the "add to group" menu at the release point
+      // so the user doesn't have to right-click as a second gesture. Only
+      // if the drag actually produced a non-empty selection.
+      if (anchor !== null && anchor >= 0) {
+        setCtxMenu({ x: ev.clientX, y: ev.clientY, tokenIdx: anchor });
+      }
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  };
+
+  // Escape clears any pending selection (harmless when there is none).
+  // Runs once on mount; no dependency list so the listener stays stable.
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && setPendingSelection(new Set());
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   // Close the context menu on any click / escape outside of it. Bound only
   // while the menu is open to avoid a global always-on listener.
@@ -361,6 +421,14 @@ export default function InfoFlow() {
   const attnN = effectiveGrouped ? effectiveGrouped.attention_norms : data?.attention_norms;
   const mlpN = effectiveGrouped ? effectiveGrouped.mlp_norms : data?.mlp_norms;
 
+  // Preview color mapping for the trace legend. In custom mode, tracks the
+  // currently-edited customMask (not the applied one) so users see what the
+  // grouping *will* look like once they hit apply. Falls back to the applied
+  // mapping outside custom mode.
+  const previewTokenToSource = mode === "custom" && customMask ? customMask : tokenToSource;
+  const previewNumSources =
+    mode === "custom" && customMask ? Math.max(...customMask) + 1 : numSources;
+
   // Custom mode: "dirty" iff customMask (what the user has edited) differs
   // from what /apply_mask last returned. Drives the "apply" button state.
   const customDirty =
@@ -400,6 +468,7 @@ export default function InfoFlow() {
 
   return (
     <div
+      onPointerDown={onAppPointerDown}
       style={{
         padding: "32px 36px 40px",
         fontFamily: MONO,
@@ -407,6 +476,10 @@ export default function InfoFlow() {
         margin: "0 auto",
         background: "#fff",
         color: "#111",
+        // Suppress the browser's native text-selection while a drag is in
+        // progress in custom mode so we don't get double blue-highlight over
+        // the app UI.
+        userSelect: mode === "custom" && isDragging ? "none" : "auto",
       }}
     >
       {/* title */}
@@ -547,95 +620,160 @@ export default function InfoFlow() {
             ))}
             {groupLoading && <span style={{ color: "#aaa" }}>…</span>}
             {mode === "custom" && (
-              <button
-                onClick={applyCustomMask}
-                disabled={!customDirty || groupLoading}
-                title={customDirty ? "apply mask to backend" : "no changes since last apply"}
-                style={{
-                  fontFamily: MONO,
-                  fontSize: 10,
-                  padding: "3px 10px",
-                  border: `1px solid ${customDirty ? "#333" : "#ddd"}`,
-                  background: customDirty ? "#fff" : "#fafafa",
-                  color: customDirty ? "#111" : "#bbb",
-                  cursor: customDirty ? "pointer" : "default",
-                  marginLeft: "auto",
-                }}
-              >
-                {customDirty ? "apply •" : "apply"}
-              </button>
+              <div style={{ display: "flex", gap: 4, marginLeft: "auto", alignItems: "center" }}>
+                {customDirty && (
+                  <button
+                    onClick={() =>
+                      customData && setCustomMask(customData.group.slice())
+                    }
+                    title="revert preview to last-applied mask"
+                    style={{
+                      fontFamily: MONO,
+                      fontSize: 10,
+                      padding: "3px 8px",
+                      border: "1px solid #999",
+                      background: "#fff",
+                      color: "#666",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+                <button
+                  onClick={applyCustomMask}
+                  disabled={!customDirty || groupLoading}
+                  title={customDirty ? "apply mask to backend" : "no changes since last apply"}
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: 10,
+                    padding: "3px 10px",
+                    border: `1px solid ${customDirty ? "#333" : "#ddd"}`,
+                    background: customDirty ? "#fff" : "#fafafa",
+                    color: customDirty ? "#111" : "#bbb",
+                    cursor: customDirty ? "pointer" : "default",
+                  }}
+                >
+                  {customDirty ? "apply •" : "apply"}
+                </button>
+              </div>
             )}
           </div>
 
-          {/* token legend — click to trace. In custom mode, this row also
-              accepts rubber-band selection (drag on empty space) + right-click
-              on tokens to open the "add to group" menu. */}
+          {/* GROUPS row (custom mode only): the editable line. Stylistically
+              distinct from TRACE so it reads as a *selection zone* — dashed
+              outer border, faint tinted background, chip-shaped tokens with
+              their own borders. Colors preview the *pending* customMask (not
+              applied), so users see their in-progress edits.
+              Drag anywhere selects a range; right-click a chip opens the
+              assign menu. */}
+          {mode === "custom" && (
+            <div
+              style={{
+                display: "flex",
+                gap: 14,
+                marginTop: 20,
+                marginBottom: 24,
+                alignItems: "center",
+                flexWrap: "wrap",
+                cursor: "text",
+              }}
+            >
+              <span style={{ fontSize: 9, color: "#bbb", textTransform: "uppercase", letterSpacing: ".08em" }}>
+                groups:
+              </span>
+              {tokens.map((tok, i) => {
+                const sPreview = previewTokenToSource[i];
+                const previewColor = colorFor(sPreview, previewNumSources);
+                const pending = pendingSelection.has(i);
+                return (
+                  <div
+                    key={i}
+                    ref={(el) => {
+                      tokenRefs.current[i] = el;
+                    }}
+                    style={{
+                      padding: "2px 4px",
+                      // Text-selection-style highlight: soft blue background,
+                      // no outline. Reads as swept-over text rather than a
+                      // spreadsheet-style box selection.
+                      background: pending ? "rgba(50, 120, 220, 0.22)" : "transparent",
+                    }}
+                  >
+                    <button
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setCtxMenu({ x: e.clientX, y: e.clientY, tokenIdx: i });
+                      }}
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: previewColor,
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        cursor: "text",
+                      }}
+                    >
+                      {tok}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* token legend — click to trace. In custom mode, drag *anywhere*
+              on the page selects a contiguous range of tokens; right-click on
+              a token opens the "add to group" menu for the selection (or
+              just that token if nothing is selected). */}
           <div
-            ref={traceRowRef}
-            onPointerDown={onTraceRowPointerDown}
-            onPointerMove={onTraceRowPointerMove}
-            onPointerUp={onTraceRowPointerUp}
-            onPointerCancel={onTraceRowPointerUp}
             style={{
-              position: "relative",
               display: "flex",
               gap: 14,
               marginBottom: 14,
               alignItems: "center",
               flexWrap: "wrap",
-              cursor: mode === "custom" ? (dragRect ? "crosshair" : "cell") : "default",
-              userSelect: mode === "custom" ? "none" : "auto",
             }}
           >
             <span style={{ fontSize: 9, color: "#bbb", textTransform: "uppercase", letterSpacing: ".08em" }}>
               trace:
             </span>
             {tokens.map((tok, i) => {
-              // In grouped mode, s is the group id for token i, so tokens in
-              // the same word share color, selected state, and hidden state.
+              // TRACE row uses the *applied* grouping colors (matching the
+              // bars). Editing / drag-select / right-click live in the GROUPS
+              // row below, not here.
               const s = tokenToSource[i];
+              const color = colorFor(s, numSources);
               const active = selected === s;
               const isHidden = hidden.has(s);
               const dim = selected !== null && !active;
-              const pending = pendingSelection.has(i);
               return (
                 <div
                   key={i}
-                  ref={(el) => {
-                    tokenRefs.current[i] = el;
-                  }}
                   style={{
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     gap: 2,
                     padding: "2px 4px",
-                    // Dashed outline for tokens picked by the rubber-band; a
-                    // transparent border in the default state so the layout
-                    // doesn't jump when the outline appears.
-                    border: pending ? "1px dashed #369" : "1px dashed transparent",
-                    background: pending ? "rgba(50, 100, 200, 0.06)" : "transparent",
                   }}
                 >
                   <button
                     onClick={() => !isHidden && setSelected(active ? null : s)}
-                    onContextMenu={(e) => {
-                      if (mode !== "custom") return; // let the browser show its menu
-                      e.preventDefault();
-                      setCtxMenu({ x: e.clientX, y: e.clientY, tokenIdx: i });
-                    }}
                     disabled={isHidden}
                     style={{
                       fontFamily: MONO,
                       fontSize: 12,
                       fontWeight: active ? 700 : 500,
-                      color: isHidden ? "#ccc" : dim ? "#ddd" : colorFor(s, numSources),
+                      color: isHidden ? "#ccc" : dim ? "#ddd" : color,
                       textDecoration: isHidden ? "line-through" : "none",
                       background: "none",
                       border: "none",
                       padding: 0,
                       cursor: isHidden ? "default" : "pointer",
-                      borderBottom: active ? `2px solid ${colorFor(s, numSources)}` : "2px solid transparent",
+                      borderBottom: active ? `2px solid ${color}` : "2px solid transparent",
                     }}
                   >
                     {tok}
@@ -674,21 +812,6 @@ export default function InfoFlow() {
               >
                 × clear
               </button>
-            )}
-            {/* live rubber-band rectangle (custom mode only, while dragging) */}
-            {dragRect && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: Math.min(dragRect.x0, dragRect.x1),
-                  top: Math.min(dragRect.y0, dragRect.y1),
-                  width: Math.abs(dragRect.x1 - dragRect.x0),
-                  height: Math.abs(dragRect.y1 - dragRect.y0),
-                  background: "rgba(50, 100, 200, 0.08)",
-                  border: "1px dashed #369",
-                  pointerEvents: "none",
-                }}
-              />
             )}
           </div>
 
@@ -732,7 +855,10 @@ export default function InfoFlow() {
           )}
 
           {/* grid — wrapped in zoom/pan surface (mouse wheel zooms centered
-              on the cursor, click-drag pans, reset button top-right). */}
+              on the cursor, click-drag pans, reset button top-right). The
+              gridWrapperRef div lets the global drag-select handler detect
+              "pointer is inside the grid" and skip, so pan keeps working. */}
+          <div ref={gridWrapperRef}>
           <ZoomPanVanilla>
             {rows.map((row, ri) => {
               const isMLP = row.type === "mlp";
@@ -831,6 +957,7 @@ export default function InfoFlow() {
               })}
             </div>
           </ZoomPanVanilla>
+          </div>
         </>
       )}
 
