@@ -63,7 +63,7 @@ sys.path.insert(0, str(HERE))
 
 from flask import Flask, Response, jsonify, request  # noqa: E402
 
-from api_checks.api_cache import APICache  # noqa: E402
+from api_checks.api_cache import ModelAPICache  # noqa: E402
 from api_checks.position import LLMResidualPosition  # noqa: E402
 from info_flow.config import Config  # noqa: E402
 from sae_feature_lens import SAEFeatureLens  # noqa: E402
@@ -75,7 +75,7 @@ PAYLOAD_DIR = HERE / ".sae_payload_cache"  # decoded per-(prompt,layer) results,
 
 config = Config()
 MODEL = config.info_flow_model
-api_cache = APICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
+api_cache = ModelAPICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
 calculator = api_cache.get_infomration_calculator(MODEL)
 lens = SAEFeatureLens(device="cpu")
 

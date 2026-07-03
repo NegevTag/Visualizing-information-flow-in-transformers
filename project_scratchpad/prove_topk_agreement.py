@@ -14,7 +14,7 @@ CLAUDE_WRITTEN
 from pathlib import Path
 
 import torch
-from api_checks.api_cache import APICache
+from api_checks.api_cache import ModelAPICache
 from info_flow.config import Config
 
 PROMPTS = [
@@ -50,7 +50,7 @@ def agreement_depth(a_ids: torch.Tensor, b_ids: torch.Tensor, maxk: int) -> tupl
 
 def main() -> None:
     config = Config()
-    api_cache = APICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
+    api_cache = ModelAPICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
     calculator = api_cache.get_infomration_calculator(config.info_flow_model)
 
     print(f"{'ordK':>4} {'setK':>4} {'top1':>5}  prompt")

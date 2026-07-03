@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-ENV_FILE = Path(__file__).resolve().parents[2] / ".env.local"   # adjust depth to repo root
+ENV_FILE = Path(__file__).resolve().parents[4] / ".env.local"   # repo root (VisulaiztionInfoFlowDemo)
 model_config = SettingsConfigDict(env_file=ENV_FILE,env_file_encoding="utf-8",extra="ignore",)
 
 

@@ -16,7 +16,7 @@ SCRATCHPAD = REPO / "project_scratchpad"
 sys.path.insert(0, str(BACKEND_SRC))
 sys.path.insert(0, str(SCRATCHPAD))
 
-from api_checks.api_cache import APICache  # noqa: E402
+from api_checks.api_cache import ModelAPICache  # noqa: E402
 from api_checks.position import LLMResidualPosition  # noqa: E402
 from info_flow.config import Config  # noqa: E402
 from sae_feature_lens import SAEFeatureLens  # noqa: E402
@@ -24,7 +24,7 @@ from sae_feature_lens import SAEFeatureLens  # noqa: E402
 PROMPT = "I hate this person. I think he is so"
 config = Config()
 MODEL = config.info_flow_model
-api_cache = APICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
+api_cache = ModelAPICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
 calculator = api_cache.get_infomration_calculator(MODEL)
 run = api_cache.get_full_run_results(MODEL, PROMPT)
 
