@@ -10,9 +10,9 @@ Run:
     uv run python tests/scratchpad/toy_compile_check.py
 """
 
-from info_flow.ex6_better_percision_key_in_mat_f32 import calc_contribution_per_layer_per_residual
-from tests.scratchpad.toy_llama_no_attention_no_ov_unit_embeding import ToyLlamaNoAttentionNoOvUnitEmbeding
-from tests.scratchpad.toy_llama_atten_one_back import ToyLllamaAttenOneBack
+from api_checks.model_calculator import calc_contribution_per_layer_per_residual
+from tests.scratchpad.toy_llama import ToyLlama
+
 
 
 
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # temporarily change `remote=True` -> `remote='local'` inside
     # calc_contribution_per_layer_per_residual. Otherwise it'll try to ship
     # to NDIF and you'll see MissedProviderError instead of the real cause.
-    model = ToyLllamaAttenOneBack.build_nnsight_mode()
+    model = ToyLlama.build_nnsight_mode()
     prompt = "The cat sat on the"
     result = calc_contribution_per_layer_per_residual(model, prompt,remote = 'local')
     print(f"OK. layers returned: {len(result)}")

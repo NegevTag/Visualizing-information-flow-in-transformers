@@ -11,7 +11,8 @@ from functools import lru_cache
 from urllib.parse import quote
 
 
-class APICache:
+class ModelAPICache:
+    
     # Two levels cache, memory (managed by functools.lru_cach, both for large results and no need to connect each time), and disk
     def __init__(self, cache_path: Path, hf_token):
         self.cache_path = cache_path

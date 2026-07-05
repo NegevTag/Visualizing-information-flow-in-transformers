@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from api_checks.api_cache import APICache
+from api_checks.api_cache import ModelAPICache
 from api_checks.position import LLMResidualPosition
 import api_checks.utils as utils
 from info_flow.config import Config
@@ -15,7 +15,7 @@ app = FastAPI()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 config = Config()
-api_cache = APICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
+api_cache = ModelAPICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
 
 
 class ReturnInfo(BaseModel):

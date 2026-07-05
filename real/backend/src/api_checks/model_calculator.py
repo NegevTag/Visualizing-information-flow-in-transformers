@@ -73,6 +73,13 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             layer = model.model.layers[l]
             W_V = layer.self_attn.v_proj.weight.float()  # (Hkv*d_v,d_model)
             W_O = layer.self_attn.o_proj.weight.float()  # (d, H_q* d_v)
+            
+            if W_V.device != post_mlp_contribution.device:
+                print(f"Switching device to {W_V.device}")
+                post_mlp_contribution = post_mlp_contribution.to(W_V.device)
+                post_attention_contribution = post_attention_contribution.to(W_V.device)
+                
+            
             post_rmssnorm1_contribution = caclulate_post_rmsnorm1_contribution(layer, post_mlp_contribution[l])  # (position,source,d_model)
 
             attention_ouput_per_source = torch.zeros((PROMPT_LEN, PROMPT_LEN, D_MODEL), device=device, dtype=dtype).save()  # (position(query),source,d_model)

@@ -12,7 +12,7 @@ CLAUDE_WRITTEN
 
 from pathlib import Path
 
-from api_checks.api_cache import APICache
+from api_checks.api_cache import ModelAPICache
 from info_flow.config import Config
 
 # Fresh-ish prompts (distinct from "First test, lets see") to force real runs.
@@ -34,7 +34,7 @@ TOP_K = 10
 
 def main() -> None:
     config = Config()
-    api_cache = APICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
+    api_cache = ModelAPICache(hf_token=config.hf_token, cache_path=Path(config.result_cache_path))
     calculator = api_cache.get_infomration_calculator(config.info_flow_model)
 
     all_match = True
