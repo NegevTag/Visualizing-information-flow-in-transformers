@@ -49,12 +49,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             rms_eps = model.model.config.rms_norm_eps
             return _calculate_mlp_contribution(rms_eps, rms_weight, post_attention_contibutions)
 
-        def calc_post_rms_last(post_attention_contibutions):
-            rms_weight = model.model.norm.weight.float()
-            rms_eps = model.model.config.rms_norm_eps
-            return _calculate_mlp_contribution(rms_eps, rms_weight, post_attention_contibutions)
-
-        embed = model.model.embed_tokens.output.save()[0]  # (seq_len, d_model)
+        embed = model.model.embed_tokens.output[0]  # (seq_len, d_model)
         PROMPT_LEN = len(embed)
 
         # ouput init
@@ -67,6 +62,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
         PROMPT_LEN = len(embed)
         for p in range(PROMPT_LEN):
             post_mlp_contribution[0][p][p] = embed[p]
+        del embed
 
         # per layer loop
         for l in range(LAYERS_NUM):
@@ -82,7 +78,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             
             post_rmssnorm1_contribution = caclulate_post_rmsnorm1_contribution(layer, post_mlp_contribution[l])  # (position,source,d_model)
 
-            attention_ouput_per_source = torch.zeros((PROMPT_LEN, PROMPT_LEN, D_MODEL), device=device, dtype=dtype).save()  # (position(query),source,d_model)
+            attention_ouput_per_source = torch.zeros((PROMPT_LEN, PROMPT_LEN, D_MODEL), device=device, dtype=dtype) # (position(query),source,d_model)
             attn_pattern = layer.self_attn.output[1][0].float()  # (H_q,prompt_len(query),prompt_len(key)) post softmax
             for q_residual in range(PROMPT_LEN):
                 per_head_key_v = post_rmssnorm1_contribution @ W_V.T  # (key,prompt_len (source),H_kv * d_v) =  (key,prompt_len(source),d_model) x (d_model,Hkv*dv)
@@ -112,6 +108,7 @@ def calc_contribution_per_layer_per_residual(model: nnsight.LanguageModel, promp
             post_mlp_contribution[l + 1] = mlp_contribution + post_attention_contribution[l]  # (layer,position,source,d_model)
 
             real_mlp_residual[l] = layer.output[0].save()  # (layer,p_len,d_model)
+            del W_up,W_down,W_O,W_V
 
 
     return (post_mlp_contribution[1:], post_attention_contribution), (real_mlp_residual, real_attention_residual)  # ((layer,position,source,d_model), (layer,position,source,d_model)),(#(layer,p_len,d_model),#(layer,p_len,d_model)) for percision calcuations

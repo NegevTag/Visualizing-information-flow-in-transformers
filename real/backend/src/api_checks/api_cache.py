@@ -9,10 +9,11 @@ from api_checks.model_parmeters import ModelParameters
 import api_checks.utils as utils
 from functools import lru_cache
 from urllib.parse import quote
+import hashlib
 
 
 class ModelAPICache:
-    
+
     # Two levels cache, memory (managed by functools.lru_cach, both for large results and no need to connect each time), and disk
     def __init__(self, cache_path: Path, hf_token):
         self.cache_path = cache_path
@@ -23,10 +24,12 @@ class ModelAPICache:
     @lru_cache(maxsize=10)
     def get_contributions(self, model_name: str, prompt: str, mask: tuple[Any] | None = None):
         if mask == None:
-            return self.get_full_run_results(model_name,prompt).contributions
+            return self.get_full_run_results(model_name, prompt).contributions
         mask = list(mask)
         original_contributions = self.get_full_run_results(model_name, prompt).contributions
-        return utils.group_contributions(mask=mask, contributions=original_contributions)
+        return utils.get_tokenpacks_indexed_contributions(
+            mask=mask, contributions=original_contributions
+        ).tokenpacks_contributions
 
     @lru_cache(maxsize=1)
     def get_full_run_results(self, model_name: str, prompt: str) -> FullRunResults:
@@ -53,7 +56,7 @@ class ModelAPICache:
 
     @classmethod
     def _get_result_key_name(cls, model_name: str, prompt: str) -> str:
-        return quote(f"{model_name}|||{prompt}", safe="")
+        return str(hashlib.sha256(f"{model_name}|||{prompt}".encode("utf-8")).hexdigest())
 
     def _dump(self, result: FullRunResults, model_name: str, prompt: str) -> Path:
         # serialize tensors + scalars to a single .pt file keyed by `key`
@@ -67,6 +70,8 @@ class ModelAPICache:
             "layers": result.dimentions.layers,
             "prompt_len": result.dimentions.prompt_len,
             "d_model": result.dimentions.d_model,
+            "prompt": prompt,
+            "model_name": model_name,
         }
         torch.save(payload, path)
         return path
