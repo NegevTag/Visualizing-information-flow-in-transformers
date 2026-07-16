@@ -54,9 +54,9 @@ def calc_norms(prompt: str):
     return ReturnInfo(attention_norms=attention_norms, mlp_norms=mlp_norms, tokens=tokens, top_perdictions=top_perdictions)
 
 
-@app.post("/load_unembedding")
-def load_unembeddings() -> None:
-    api_cache.load_unembedding_matrix(app.state.args.model)
+# @app.post("/load_unembedding")
+# def load_unembeddings() -> None:
+#     api_cache.load_unembedding_matrix(app.state.args.model)
 
 
 @app.post("/apply_mask")
