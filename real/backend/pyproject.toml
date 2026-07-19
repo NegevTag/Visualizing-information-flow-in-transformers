@@ -18,6 +18,7 @@ dependencies = [
     "sae-lens>=5",
     "dash>=4.2.0",
     "ipywidgets>=8.1.8",
+    "more-itertools>=11.1.0",
 ]
 
 [project.optional-dependencies]
