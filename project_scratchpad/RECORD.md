@@ -244,3 +244,106 @@ magnitude instead.
 
 **Gotcha:** `sae.encode` output keeps `requires_grad`; wrap in `torch.no_grad()`
 (or `.detach()`) before `float()` to avoid the scalar-conversion warning.
+
+---
+
+## 2026-07-09 — NDIF OOM root cause: poisoned Ray replica (VERIFIED)
+
+**Symptom:** `calc_contribution_per_layer_per_residual` OOMs remotely. Deterministic
+per replica: sometimes dies mid-layer (`W_up`), sometimes at the very first
+allocation (line 62, `post_mlp_contribution`). Failure state always ~`17.52 GiB
+allocated / 17.69 GiB allowed` with ~26 GiB *physically free* on the card.
+
+**Experiment:** `probe/04_memory_probe.py` — a minimal trace that only *reads*
+`torch.cuda.memory_allocated()` (server-side, returned via `.save()`), so it
+survives even a full replica. Sequence: probe(fresh) → run real calc (let it OOM)
+→ probe(after), all back-to-back to hit the same replica.
+
+**Result (verified, same replica all 3 requests):**
+- fresh: allocated **15.00 GiB** (== Llama-3.1-8B bf16, 14.96 GiB — pure model)
+- after OOM: allocated **17.25 GiB**  → **Δ = +2.25 GiB leaked**
+
+**Follow-up battery (same script, 5 clean / OOM / 5 after / 30s / 3 delayed):**
+- clean x5   : 15.00 GiB every time (successful traces do NOT leak; baseline is stable)
+- after  x5  : 17.25 GiB every time (immediately post-error; reproducible +2.25 GiB)
+- delayed x3 : 15.00 GiB (after 30s the leak is FULLY reclaimed)
+
+**Conclusion (corrected):** A failed remote trace DOES leave ~2.25 GiB resident on
+the replica (PyTorch keeps tensors alive via the server-side exception's refs,
+https://discuss.pytorch.org/t/gpu-memory-not-freed-after-caught-error/24363), but
+the leak is TRANSIENT — reclaimed within <30s (not "poisoned until recycle", which
+was my earlier overstatement). Two compounding problems:
+  1. Clean headroom is only `17.69 - 15.00 ≈ 2.7 GiB`; the heavy run's peak
+     (two (L,P,P,d) f32 stacks = 1.63 GiB + per-layer f32 weight deepcopies
+     ~0.55 GiB/layer + `attention_ouput_per_source`) exceeds it → OOM mid-layer.
+  2. That OOM leaks ~2.25 GiB for a ~tens-of-seconds window. A tight retry loop
+     (e.g. celebrity loop) hits the still-elevated replica and fails EARLIER, at
+     line 62. Waiting ~30s changes the failure point but not the root cause.
+Deterministic-looking failures were back-to-back retries inside the self-healing
+window, not a permanent poison.
+
+**Timing bracket (05_leak_timing.py, 3 trials, same session, no reconnect):**
+cleared at ~0s / ~10s / ~10s. So the leak clears in **~0-10s, variable** — the
+earlier "30s" was just the first sample point, not the threshold. Recovery is
+purely server-side/client-independent: the leak was visible at the very start of
+a brand-new client PROCESS and cleared with no reconnect. Caveat: readings bounce
+15.00/17.25 because NDIF load-balances across MULTIPLE replicas with independent
+memory; can't separate "leaked replica healed" from "routed to a clean replica"
+(sandbox blocks `import os`, so no replica id).
+
+**Negative result (06_grad_check.py):** "no backward needed → save memory?" No.
+Server-side `torch.is_grad_enabled()==True` BUT `weight.requires_grad==False`, so no
+leaf requires grad → no autograd graph / no saved-for-backward buffers exist.
+`torch.no_grad()` is a memory no-op here. Memory = weights (14.96 GiB) + our explicit
+tensors; grad is not involved.
+
+**Fixes (target: peak < 2.7 GiB so a clean replica survives and never poisons):**
+- Drop the stray `.save()` on `attention_ouput_per_source` (model_calculator.py:85)
+  — used one line later, never needs to persist. Reclaims up to ~0.8 GiB.
+- Store the two stacks in bf16 (lines 62-63): 1.63 → 0.82 GiB.
+- Optional: offload finished layers to CPU (only need layer l -> l+1 live).
+
+**Gotchas found while probing:**
+- Windows console (cp1252) crashes on nnsight's status spinner glyph; set
+  `PYTHONIOENCODING=utf-8` when running remote traces from a plain shell.
+- `.env.local` `RESULT_CACHE_PATH` value has spaces → breaks `source`; export the
+  needed keys individually instead.
+
+---
+
+## 2026-07-09 — Concurrent remote NDIF traces via asyncio (question: async remote trace?)
+
+**Question:** can `model.trace(remote=True)` be run asynchronously / concurrently?
+
+**Reading nnsight 0.7.0 source suggested "yes, natively":** `trace()` takes
+`blocking=`, and `Tracer.__aenter__` sets `asynchronous=True` → `RemoteBackend`
+routes to `async_request` (awaits an async WebSocket loop, then `tracer.push()`es
+saves back into the frame). Looked seamless on paper.
+
+**Ran it — native `async with` is BROKEN in 0.7.0 (two separate bugs):**
+1. `WithBlockNotFoundError`: `get_entered_frame` (intervention/tracing/util.py)
+   only walks past `__enter__` frames, not the extra `__aenter__` frame, so it
+   parses the wrong source. Fixable with a 1-line monkeypatch (skip `__aenter__`
+   too).
+2. Even patched, `async_request` raises
+   `'RemoteInterleavingTracer' object has no attribute 'model'`. Deeper wiring
+   bug; not worth chasing.
+
+**What WORKS (verified against live api.ndif.us, Llama-3.1-8B, 4 prompts):**
+wrap the ordinary *blocking* trace in `asyncio.to_thread` —
+```python
+async def run_one(prompt):
+    def blocking():
+        with model.trace(prompt, remote=True):
+            return model.lm_head.output.save()
+    return await asyncio.to_thread(blocking)
+results = await asyncio.gather(*(run_one(p) for p in prompts))
+```
+Real result: 4/4 jobs in-flight at once, wall 29.6s vs 114.9s summed = **3.88x**
+speedup, all logits finite, sensible base-model predictions
+(hydrogen→oxygen, hot→cold). Concurrency comes from threads (remote trace is
+network-bound, GIL released during I/O); NDIF queues the jobs server-side.
+
+**Lesson:** the "reads like it works" async path in nnsight 0.7.0 does not run;
+`asyncio.to_thread` + blocking trace is the reliable "looks async" pattern.
+Test script: project_scratchpad/real/backend/src/tests/scratchpad/probe/07_async_remote.py
